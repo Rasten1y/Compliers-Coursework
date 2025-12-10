@@ -131,6 +131,10 @@ type loopContext struct {
 	continueTarget string
 }
 
+func (l *lowerer) isMSVC() bool {
+	return strings.Contains(l.mod.TargetTriple, "windows-msvc")
+}
+
 func isRuntimeExtern(name string) bool {
 	return name == "gominic_print" || name == "gominic_printInt" || name == "gominic_println" || name == "gominic_makeSlice"
 }
@@ -172,9 +176,12 @@ func (l *lowerer) lowerFunc(fnDecl *ast.FuncDecl) error {
 
 	funcName := fnDecl.Name.Name
 	if sig.Recv() != nil {
-		return fmt.Errorf("unsupported: methods with receiver")
-	}
-	if l.prefix != "" && !isRuntimeExtern(funcName) {
+		base := recvBaseName(sig.Recv().Type())
+		funcName = base + "." + funcName
+		if l.prefix != "" && !strings.Contains(base, ".") {
+			funcName = l.prefix + funcName
+		}
+	} else if l.prefix != "" && !isRuntimeExtern(funcName) {
 		funcName = l.prefix + funcName
 	}
 
@@ -469,14 +476,17 @@ func (l *lowerer) lowerAssign(as *ast.AssignStmt) error {
 				}
 				if baseTok == token.ADD {
 					if basic, ok := tv.Underlying().(*types.Basic); ok && (basic.Kind() == types.String || basic.Kind() == types.UntypedString) {
-						dest := l.newTemp(ir.ValueType(cur))
+						strTy := ir.ValueType(cur)
+						outPtr := l.allocaTemp(strTy)
+						curPtr := l.addrOfTemp(cur)
+						addPtr := l.addrOfTemp(values[i])
 						l.block.Append(ir.Call{
-							Dest: dest,
 							Name: "gominic_str_concat",
-							Args: []ir.Value{cur, values[i]},
-							Ret:  ir.ValueType(cur),
+							Args: []ir.Value{outPtr, curPtr, addPtr},
 						})
-						if err := l.storeValue(slot, dest); err != nil {
+						out := l.newTemp(strTy)
+						l.block.Append(ir.Load{Dest: out, Src: outPtr, Align: alignOfIRType(strTy)})
+						if err := l.storeValue(slot, out); err != nil {
 							return err
 						}
 						continue
@@ -1242,14 +1252,17 @@ func (l *lowerer) lowerBinary(e *ast.BinaryExpr) (ir.Value, error) {
 	}
 	if e.Op == token.ADD || e.Op == token.SUB || e.Op == token.MUL || e.Op == token.QUO || e.Op == token.REM || e.Op == token.AND || e.Op == token.OR {
 		if basic, ok := tv.Type.Underlying().(*types.Basic); ok && (basic.Kind() == types.String || basic.Kind() == types.UntypedString) && e.Op == token.ADD {
-			dest := l.newTemp(ir.ValueType(x))
+			strTy := ir.ValueType(x)
+			outPtr := l.allocaTemp(strTy)
+			xPtr := l.addrOfTemp(x)
+			yPtr := l.addrOfTemp(y)
 			l.block.Append(ir.Call{
-				Dest: dest,
 				Name: "gominic_str_concat",
-				Args: []ir.Value{x, y},
-				Ret:  ir.ValueType(x),
+				Args: []ir.Value{outPtr, xPtr, yPtr},
 			})
-			return dest, nil
+			out := l.newTemp(strTy)
+			l.block.Append(ir.Load{Dest: out, Src: outPtr, Align: alignOfIRType(strTy)})
+			return out, nil
 		}
 		ty, err := goTypeToIR(tv.Type)
 		if err != nil {
@@ -1671,6 +1684,16 @@ func (l *lowerer) constValue(expr ast.Expr) (ir.Value, error) {
 		return ir.NewConstant("0", ty), nil
 	}
 	if kind == constant.Int {
+		// If IR type is float, emit float constant to avoid invalid "fadd double 1".
+		if ty != nil && ty.String() == ir.F64.String() {
+			if f, ok := constant.Float64Val(constant.ToFloat(tv.Value)); ok {
+				s := strconv.FormatFloat(f, 'g', -1, 64)
+				if !strings.ContainsAny(s, ".eE") {
+					s += ".0"
+				}
+				return ir.NewConstant(s, ty), nil
+			}
+		}
 		if isUnsigned(tv.Type) {
 			if v, ok := constant.Uint64Val(tv.Value); ok {
 				return ir.NewConstant(strconv.FormatUint(v, 10), ty), nil
@@ -3163,11 +3186,6 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, wantValue bool) (ir.Value, error
 	} else {
 		return l.lowerConversion(call, wantValue)
 	}
-	if l.prefix != "" {
-		if !strings.Contains(fnName, ".") && !isRuntimeExtern(fnName) {
-			fnName = l.prefix + fnName
-		}
-	}
 
 	if fnName == "make" {
 		return l.lowerMake(call, wantValue)
@@ -3240,9 +3258,14 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, wantValue bool) (ir.Value, error
 			}
 			return nil, fmt.Errorf("len unsupported for type %T", tv.Underlying())
 		}
-	
+
 	if fnName == "append" {
 		return l.lowerAppend(call)
+	}
+	if l.prefix != "" {
+		if !strings.Contains(fnName, ".") && !isRuntimeExtern(fnName) && fnName != "len" && fnName != "make" && fnName != "append" {
+			fnName = l.prefix + fnName
+		}
 	}
 
 	sigType := l.prog.TypesInfo.TypeOf(call.Fun)
@@ -3429,6 +3452,42 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, wantValue bool) (ir.Value, error
 		retTy = ir.StructType{Fields: fields}
 	}
 
+	if l.isMSVC() && fnName == "gominic_argv" && retTy != nil && isAggregateType(retTy) {
+		outPtr := l.allocaTemp(retTy)
+		callInst := ir.Call{
+			Name:     fnName,
+			Args:     append([]ir.Value{outPtr}, args...),
+			SretType: retTy,
+		}
+		l.block.Append(callInst)
+		if wantValue {
+			out := l.newTemp(retTy)
+			l.block.Append(ir.Load{Dest: out, Src: outPtr, Align: alignOfIRType(retTy)})
+			return out, nil
+		}
+		return nil, nil
+	}
+
+	if fnName == "gominic_str_concat" && retTy != nil && isAggregateType(retTy) {
+		if len(args) < 2 {
+			return nil, fmt.Errorf("gominic_str_concat requires two arguments")
+		}
+		outPtr := l.allocaTemp(retTy)
+		aPtr := l.addrOfTemp(args[0])
+		bPtr := l.addrOfTemp(args[1])
+		callInst := ir.Call{
+			Name: fnName,
+			Args: []ir.Value{outPtr, aPtr, bPtr},
+		}
+		l.block.Append(callInst)
+		if wantValue {
+			out := l.newTemp(retTy)
+			l.block.Append(ir.Load{Dest: out, Src: outPtr, Align: alignOfIRType(retTy)})
+			return out, nil
+		}
+		return nil, nil
+	}
+
 	callInst := ir.Call{
 		Name: fnName,
 		Args: args,
@@ -3511,7 +3570,7 @@ func (l *lowerer) lowerMethodCall(sel *ast.SelectorExpr, call *ast.CallExpr, wan
 	}
 
 	name := recvBaseName(methodSig.Recv().Type()) + "." + sel.Sel.Name
-	if l.prefix != "" {
+	if l.prefix != "" && !strings.Contains(name, ".") {
 		name = l.prefix + name
 	}
 	callInst := ir.Call{
@@ -3652,7 +3711,8 @@ func goTypeToIRRec(t types.Type, seen map[types.Type]bool) (ir.Type, error) {
 		return ir.PtrI8, nil
 	}
 	if _, ok := t.(*types.Interface); ok {
-		return nil, fmt.Errorf("unsupported interface type")
+		// Treat interfaces as opaque pointers.
+		return ir.PtrI8, nil
 	}
 	if _, ok := t.(*types.Chan); ok {
 		return ir.PtrI8, nil
@@ -4029,11 +4089,17 @@ func mapKeyKind(t types.Type) (int, error) {
 func recvBaseName(t types.Type) string {
 	if p, ok := t.(*types.Pointer); ok {
 		if named, ok := p.Elem().(*types.Named); ok {
+			if named.Obj().Pkg() != nil {
+				return named.Obj().Pkg().Name() + "." + named.Obj().Name()
+			}
 			return named.Obj().Name()
 		}
 		return "recvptr"
 	}
 	if named, ok := t.(*types.Named); ok {
+		if named.Obj().Pkg() != nil {
+			return named.Obj().Pkg().Name() + "." + named.Obj().Name()
+		}
 		return named.Obj().Name()
 	}
 	return "recv"

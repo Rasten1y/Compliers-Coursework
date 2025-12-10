@@ -28,8 +28,8 @@ i64 gominic_argc(void) {
 #endif
 }
 
-// Return argv[idx] as a {data,len} pair. If out of range, returns {NULL, 0}.
-gominic_string gominic_argv(i64 idx) {
+// Return argv[idx] as a {data,len} pair via sret pointer. If out of range, returns {NULL, 0}.
+void gominic_argv(gominic_string *out, i64 idx) {
     gominic_string res;
     res.data = NULL;
     res.len = 0;
@@ -37,7 +37,8 @@ gominic_string gominic_argv(i64 idx) {
     extern char **__argv;
     extern int __argc;
     if (idx < 0 || idx >= (i64)__argc) {
-        return res;
+        *out = res;
+        return;
     }
     res.data = __argv[idx];
     res.len = (i64)strlen(__argv[idx]);
@@ -56,12 +57,13 @@ gominic_string gominic_argv(i64 idx) {
         use_argc = (i64)argc;
     }
     if (idx < 0 || idx >= use_argc) {
-        return res;
+        *out = res;
+        return;
     }
     res.data = use_argv[idx];
     res.len = (i64)strlen(use_argv[idx]);
 #endif
-    return res;
+    *out = res;
 }
 
 // Write a buffer to file path (not null-terminated, provided length). Returns 1 on success, 0 otherwise.

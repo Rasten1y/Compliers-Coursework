@@ -11,14 +11,17 @@ typedef struct {
 // Minimal runtime helpers callable from generated code.
 void gominic_print(const char *s, int64_t len) {
 	fwrite(s, 1, (size_t)len, stdout);
+	fflush(stdout);
 }
 
 void gominic_printInt(int64_t v) {
 	printf("%lld", (long long)v);
+	fflush(stdout);
 }
 
 void gominic_println(void) {
 	fputc('\n', stdout);
+	fflush(stdout);
 }
 
 // Simple heap allocation for slices: returns void*.
@@ -62,22 +65,23 @@ int gominic_str_eq(const char *a, int64_t alen, const char *b, int64_t blen) {
 	return memcmp(a, b, (size_t)alen) == 0;
 }
 
-gominic_string gominic_str_concat(gominic_string a, gominic_string b) {
-	int64_t total = a.len + b.len;
+// Concatenate two strings; both inputs are passed by pointer to avoid ABI
+// differences across platforms.
+void gominic_str_concat(gominic_string *out, const gominic_string *a, const gominic_string *b) {
+	int64_t total = a->len + b->len;
 	char *buf = malloc((size_t)(total + 1));
 	if (buf == NULL) {
-		gominic_string empty = { "", 0 };
-		return empty;
+		out->data = "";
+		out->len = 0;
+		return;
 	}
-	if (a.len > 0) {
-		memcpy(buf, a.data, (size_t)a.len);
+	if (a->len > 0) {
+		memcpy(buf, a->data, (size_t)a->len);
 	}
-	if (b.len > 0) {
-		memcpy(buf + a.len, b.data, (size_t)b.len);
+	if (b->len > 0) {
+		memcpy(buf + a->len, b->data, (size_t)b->len);
 	}
 	buf[total] = 0;
-	gominic_string res;
-	res.data = buf;
-	res.len = total;
-	return res;
+	out->data = buf;
+	out->len = total;
 }

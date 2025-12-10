@@ -59,8 +59,8 @@ func PtrTo(elem Type) PointerType {
 
 func (s StructType) String() string {
 	parts := make([]string, len(s.Fields))
-	for i, f := range s.Fields {
-		parts[i] = f.String()
+	for i := 0; i < len(s.Fields); i++ {
+		parts[i] = s.Fields[i].String()
 	}
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
@@ -232,7 +232,8 @@ type Call struct {
 func (Call) isInstruction() {}
 func (c Call) String() string {
 	args := make([]string, len(c.Args))
-	for i, a := range c.Args {
+	for i := 0; i < len(c.Args); i++ {
+		a := c.Args[i]
 		prefix := ""
 		if i == 0 && c.SretType != nil {
 			prefix = "sret(" + c.SretType.String() + ") "
@@ -352,7 +353,8 @@ type GetElementPtr struct {
 func (GetElementPtr) isInstruction() {}
 func (g GetElementPtr) String() string {
 	parts := make([]string, len(g.Indices))
-	for i, idx := range g.Indices {
+	for i := 0; i < len(g.Indices); i++ {
+		idx := g.Indices[i]
 		parts[i] = typeString(idx) + " " + formatValue(idx)
 	}
 	return "%" + g.Dest.name + " = getelementptr inbounds " + g.Pointee.String() + ", " + typeString(g.Src) + " " + formatValue(g.Src) + ", " + strings.Join(parts, ", ")
@@ -443,7 +445,8 @@ type CallVoid struct {
 func (CallVoid) isInstruction() {}
 func (c CallVoid) String() string {
 	args := make([]string, len(c.Args))
-	for i, a := range c.Args {
+	for i := 0; i < len(c.Args); i++ {
+		a := c.Args[i]
 		args[i] = typeString(a) + " " + formatValue(a)
 	}
 	return "call void @" + c.Name + "(" + strings.Join(args, ", ") + ")"
@@ -537,6 +540,11 @@ func formatValue(v Value) string {
 		return "%" + v.name
 	}
 	if v.kind == ValueConstant && v.Raw != "" {
+		if v.ty != nil && v.ty.String() == "double" {
+			if !strings.ContainsAny(v.Raw, ".eE") {
+				return v.Raw + ".0"
+			}
+		}
 		return v.Raw
 	}
 	return v.name

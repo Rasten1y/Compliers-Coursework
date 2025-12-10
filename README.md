@@ -8,8 +8,6 @@
 - Встроенные: `len` для массивов/срезов/map/строк; `make` для срезов и map; `append(slice, elem)` (один элемент); строковая конкатенация `+`.
 - Рантайм: `gominic_print`, `gominic_printInt`, `gominic_println`, `gominic_memcpy`, `gominic_makeSlice`, `gominic_map_*`, `gominic_str_*`.
 
-Не поддерживается (возвращает ошибку фронтенда): методы/recv, интерфейсы, `switch`/type switch, `range`, type assertion, goroutines/chan/defer/panic.
-
 ## Лексическая структура
 - Идентификаторы: `[A-Za-z_][A-Za-z0-9_]*`
 - Ключевые слова: `package import var const type func return if else for break continue true false len make append`
@@ -61,19 +59,27 @@ literal        = int_lit | float_lit | string_lit | boolean_lit .
 boolean_lit    = "true" | "false" .
 ```
 
-## Сборка и запуск (обычный режим)
-1. Собрать компилятор:
-   ```
-   go build -o gominic.exe ./cmd/gominic
-   ```
-2. Скомпилировать программу на подмножестве Go:
-   ```
-   .\gominic.exe -o prog.exe main.go
-   ```
-   - `-S` — вывести только LLVM IR.
-   - `-c` — остановиться на объектнике.
-   - `-cc` — путь к clang.
-   - `-skip-check` — пропустить проверки подмножества (для самохоста).
+### Сборка и запуск (.ll → .o → .exe)
+Команды для сборки файла subset_example.go (Если имя файла другое - меняйте на соответствующее)
+Сборка на Windows (через cmd):
+```
+go build -o gominic.exe ./cmd/gominic
+```
+```
+.\gominic.exe -S subset_example.go > subset_example.ll
+```
+```
+clang -c -o subset_example.o subset_example.ll
+```
+Может всплыть предупреждение, не повлияет на работу
+```
+clang -o subset_example.exe subset_example.o runtime\print.c runtime\map.c runtime\io.c
+```
+Аналогично с большим предупреждением
+```
+.\subset_example.exe
+```
+В демо/минимальном случае достаточно `runtime\print.c`; для map/len используется `runtime\map.c`, для файловых обёрток — `runtime\io.c`.
 
 ## Демо без фронтенда
 Для проверки стадии синтеза без фронтенда есть флаг `-demo`, который генерирует IR из захардкоженного дерева в `cmd/synthdemo/main.go`. Структура демо-дерева: функция `buildSampleModule` создаёт `ir.Module` с глобальной строкой и одной функцией `main`, которая вызывает `gominic_print`, `gominic_printInt`, `gominic_println`. 

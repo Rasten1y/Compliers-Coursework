@@ -174,9 +174,6 @@ func buildRuntimeObjs(cc string, entries []struct {
 }, verbose bool) error {
 	for i := 0; i < len(entries); i++ {
 		entry := entries[i]
-		if _, err := os.Stat(entry.out); err == nil {
-			continue
-		}
 		args := []string{"-c", "-o", entry.out, entry.src}
 		if verbose {
 			vprintf("running clang to build runtime obj\n")

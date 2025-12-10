@@ -131,9 +131,36 @@ func ParseAndCheckAll(filenames []string) ([]*Program, error) {
 	return progs, nil
 }
 
-// CheckUnsupported currently disabled to simplify self-hosting.
+// CheckUnsupported rejects constructs вне нашего подмножества.
 func CheckUnsupported(file *ast.File) error {
-	return nil
+	var err error
+	ast.Inspect(file, func(n ast.Node) bool {
+		if err != nil {
+			return false
+		}
+		switch n.(type) {
+		case *ast.GoStmt,
+			*ast.DeferStmt,
+			*ast.SelectStmt,
+			*ast.SwitchStmt,
+			*ast.TypeSwitchStmt,
+			*ast.FuncLit,
+			*ast.ChanType,
+			*ast.SendStmt,
+			*ast.RangeStmt,
+			*ast.LabeledStmt:
+			err = fmt.Errorf("unsupported: %T", n)
+			return false
+		case *ast.BranchStmt:
+			bs := n.(*ast.BranchStmt)
+			if bs.Tok == token.GOTO {
+				err = fmt.Errorf("unsupported: %T", n)
+				return false
+			}
+		}
+		return true
+	})
+	return err
 }
 
 // addRuntimeBuiltins registers external runtime functions in the universe scope so
