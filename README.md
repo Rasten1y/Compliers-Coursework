@@ -2,8 +2,8 @@
 
 ## Подмножество языка
 Поддерживается только то, что нужно для сборки самого компилятора и простых демо:
-- Типы: `bool`, `int`/`int32`/`int64`/`uint32`/`uint64`, `float64`, `string` (как `{ i8*, i64 }`), массивы `[N]T`, срезы `[]T`, указатели `*T`, структуры `struct{...}`.
-- Операции: арифметика `+ - * / %` (целые), `+ - * /` (float64); сравнения `== != < <= > >=`; логика `&& || !`; присваивание `=`; вызовы функций; возврат `return` с 0/1 значением; индексирование массивов/срезов; доступ к полям.
+- Типы: `bool`, `int`/`int32`/`int64`/`uint32`/`uint64`, `float64`, `string` (как `{ i8*, i64 }`), массивы `[N]T`, срезы `[]T`, указатели `*T`, структуры `struct{...}`, `map[K]V`.
+- Операции: арифметика `+ - * / %` (целые), `+ - * /` (float64); сравнения `== != < <= > >=`; логика `&& || !`; побитовые `& | << >>` (целые); присваивание `=`; вызовы функций; возврат `return` с 0/1 значением; индексирование массивов/срезов; доступ к полям; слайс-выражения `s[i:j]`, `s[i:]`, `s[:j]`, `s[:]`.
 - Управление: `if`/`if-else` без init; `for init; cond; post`, `for cond`, `for {}`; `break`/`continue`.
 - Встроенные: `len` для массивов/срезов/map/строк; `make` для срезов и map; `append(slice, elem)` (один элемент); строковая конкатенация `+`.
 - Рантайм: `gominic_print`, `gominic_printInt`, `gominic_println`, `gominic_memcpy`, `gominic_makeSlice`, `gominic_map_*`, `gominic_str_*`.
@@ -12,7 +12,8 @@
 - Идентификаторы: `[A-Za-z_][A-Za-z0-9_]*`
 - Ключевые слова: `package import var const type func return if else for break continue true false len make append`
 - Литералы: целые в десятичной форме (`42`), `float64` (`1.23`), строковые в двойных кавычках без escape-сложностей.
-- Операторы/знаки: `+ - * / % == != < <= > >= && || ! = ; , . : ( ) { } [ ]`
+- Операторы/знаки: `+ - * / % == != < <= > >= && || ! & | << >> = ; , . : ( ) { } [ ]`
+- Комментарии: однострочные `//` и многострочные `/* */` (игнорируются при компиляции)
 
 ## Грамматика (EBNF, упрощённая под наше подмножество)
 ```
@@ -44,11 +45,12 @@ ExprStmt       = CallExpr .
 
 Expr           = BinaryExpr | UnaryExpr | PrimaryExpr .
 BinaryExpr     = Expr BinOp Expr .
-BinOp          = "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" .
+BinOp          = "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" | "&" | "|" | "<<" | ">>" .
 UnaryExpr      = ("+" | "-" | "!") Expr .
-PrimaryExpr    = ident | literal | "(" Expr ")" | Selector | Index | Call .
+PrimaryExpr    = ident | literal | "(" Expr ")" | Selector | Index | Slice | Call .
 Selector       = PrimaryExpr "." ident .
 Index          = PrimaryExpr "[" Expr "]" .
+Slice          = PrimaryExpr "[" [ Expr ] ":" [ Expr ] "]" .
 Call           = PrimaryExpr "(" [ ExprList ] ")" .
 ExprList       = Expr { "," Expr } .
 
@@ -79,16 +81,28 @@ clang -o subset_example.exe subset_example.o runtime\print.c runtime\map.c runti
 ```
 .\subset_example.exe
 ```
-В демо/минимальном случае достаточно `runtime\print.c`; для map/len используется `runtime\map.c`, для файловых обёрток — `runtime\io.c`.
+Для теста вывод следующий:
+    9
+    hi there
+    after struct
+    float ok
+    after float
+    0
+    end
 
-## Демо без фронтенда
-Для проверки стадии синтеза без фронтенда есть флаг `-demo`, который генерирует IR из захардкоженного дерева в `cmd/synthdemo/main.go`. Структура демо-дерева: функция `buildSampleModule` создаёт `ir.Module` с глобальной строкой и одной функцией `main`, которая вызывает `gominic_print`, `gominic_printInt`, `gominic_println`. 
-Быстрый запуск:
+Для map/len используется `runtime\map.c`, для файловых обёрток — `runtime\io.c`.
+
+### Сборка бэкенда
+Команды для сборки бэкенда (компиляция `backend/llvm.go` вместе с `ir/ir.go`):
+Сборка на Windows (через cmd):
 ```
 go build -o gominic.exe ./cmd/gominic
-cmd /c ".\gominic.exe -demo -S > demo.ll"
-clang -c -o demo.o demo.ll
-clang -o demo.exe demo.o runtime\print.c
-.\demo.exe    # печатает: hello from demo42
 ```
-Само демо‑дерево находится в `cmd/synthdemo/main.go` (функции `buildSampleModule`, `addStringGlobal`).
+```
+.\gominic.exe -skip-check -S -v backend\llvm.go ir\ir.go > llvm.ll
+```
+```
+clang -c -o llvm.o llvm.ll
+```
+Всплывет предупреждение, но все работает
+Собирать дальше не имеет смысла, нет точки входа

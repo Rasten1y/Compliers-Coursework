@@ -3,17 +3,46 @@ package main
 import (
 	"errors"
 	"flag"
-	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
-	"strings"
 
 	"gominic/backend"
 	"gominic/frontend"
 	"gominic/ir"
 )
+
+type parseResult struct {
+	progs []*frontend.Program
+	err   error
+}
+
+func parseAndCheckAllWrapper(files []string) parseResult {
+	var result parseResult
+	result.progs, result.err = frontend.ParseAndCheckAll(files)
+	return result
+}
+
+type buildModuleResult struct {
+	mod *ir.Module
+	err error
+}
+
+func buildModuleWrapper(progs []*frontend.Program) buildModuleResult {
+	var result buildModuleResult
+	result.mod, result.err = frontend.BuildModule(progs)
+	return result
+}
+
+type combinedOutputResult struct {
+	out []byte
+	err error
+}
+
+func combinedOutputWrapper(cmd *exec.Cmd) combinedOutputResult {
+	var result combinedOutputResult
+	result.out, result.err = cmd.CombinedOutput()
+	return result
+}
 
 func main() {
 	var output string
@@ -23,7 +52,6 @@ func main() {
 	var llOut string
 	var clangPath string
 	var skipCheck bool
-	var demo bool
 
 	flag.StringVar(&output, "o", "a.out", "output file")
 	flag.BoolVar(&emitIR, "S", false, "emit LLVM IR and exit")
@@ -32,63 +60,50 @@ func main() {
 	flag.StringVar(&llOut, "ll", "", "write LLVM IR to file instead of stdout when using -S")
 	flag.StringVar(&clangPath, "cc", "clang", "C compiler (used also to compile .ll)")
 	flag.BoolVar(&skipCheck, "skip-check", false, "skip subset checks (useful for self-hosting)")
-	flag.BoolVar(&demo, "demo", false, "use hardcoded demo IR instead of parsing Go files")
 	flag.Parse()
 
 	files := flag.Args()
-	var mod *ir.Module
-	if demo {
-		if verbose {
-			vprintf("using demo IR (hardcoded)\n")
-		}
-		mod = buildDemoModule()
-	} else {
-		if len(files) == 0 {
-			flag.Usage()
-			exit(2)
-		}
-		if verbose {
-			vprintf("compiling files\n")
-		}
-		frontend.SetSkipSubsetCheck(skipCheck)
-		progs, err := frontend.ParseAndCheckAll(files)
-		if err != nil {
-			fatalf("frontend failed: " + err.Error())
-		}
-		if verbose {
-			for i := 0; i < len(progs); i++ {
-				p := progs[i]
-				vprintf("type checked package: " + p.TypesPkg.Name() + "\n")
-			}
-		}
-		mod, err = frontend.BuildModule(progs)
-		if err != nil {
-			fatalf("IR lowering failed: " + err.Error())
+	if len(files) == 0 {
+		flag.Usage()
+		exit(2)
+	}
+	if verbose {
+		vprintf("compiling files\n")
+	}
+	frontend.SetSkipSubsetCheck(skipCheck)
+	parseRes := parseAndCheckAllWrapper(files)
+	if parseRes.err != nil {
+		fatalf("frontend failed: " + parseRes.err.Error())
+	}
+	progs := parseRes.progs
+	if verbose {
+		for i := 0; i < len(progs); i = i + 1 {
+			p := progs[i]
+			vprintf("type checked package: " + p.TypesPkg.Name() + "\n")
 		}
 	}
+	buildRes := buildModuleWrapper(progs)
+	if buildRes.err != nil {
+		fatalf("IR lowering failed: " + buildRes.err.Error())
+	}
+	mod := buildRes.mod
 
 	irText := backend.EmitModule(mod)
 
-	// runtime objects selection (demo нуждается только в print.c)
+	// runtime objects selection
 	rtEntries := []struct {
 		src string
 		out string
 	}{
 		{"runtime/print.c", "runtime/print.o"},
-	}
-	if !demo {
-		rtEntries = append(rtEntries, []struct {
-			src string
-			out string
-		}{
-			{"runtime/map.c", "runtime/map.o"},
-			{"runtime/io.c", "runtime/io.o"},
-		}...)
+		{"runtime/map.c", "runtime/map.o"},
+		{"runtime/io.c", "runtime/io.o"},
 	}
 
 	if emitIR {
 		if llOut != "" {
-			if err := os.WriteFile(llOut, []byte(irText), 0644); err != nil {
+			err := os.WriteFile(llOut, []byte(irText), 0644)
+			if err != nil {
 				fatalf("write ll failed: " + err.Error())
 			}
 		} else {
@@ -99,14 +114,17 @@ func main() {
 		if llPath == "" {
 			llPath = deriveLLPath(output)
 		}
-		if err := os.WriteFile(llPath, []byte(irText), 0644); err != nil {
+		err := os.WriteFile(llPath, []byte(irText), 0644)
+		if err != nil {
 			fatalf("write ll failed: " + err.Error())
 		}
 		objPath := output
-		if filepath.Ext(objPath) != ".o" {
-			objPath += ".o"
+		extO := ".o"
+		if fileExt(objPath) != extO {
+			objPath = objPath + extO
 		}
-		if err := compileLLWithClang(clangPath, llPath, objPath, verbose); err != nil {
+		err = compileLLWithClang(clangPath, llPath, objPath, verbose)
+		if err != nil {
 			vprintf("compile ll failed: " + err.Error() + "\n")
 			vprintf("You can try manually: " + clangPath + " -c -o " + objPath + " " + llPath + "\n")
 			exit(1)
@@ -119,23 +137,28 @@ func main() {
 		if llPath == "" {
 			llPath = deriveLLPath(output)
 		}
-		if err := os.WriteFile(llPath, []byte(irText), 0644); err != nil {
+		err := os.WriteFile(llPath, []byte(irText), 0644)
+		if err != nil {
 			fatalf("write ll failed: " + err.Error())
 		}
 		objPath := output
-		if filepath.Ext(objPath) != ".o" {
-			objPath = output + ".o"
+		extO := ".o"
+		if fileExt(objPath) != extO {
+			objPath = output + extO
 		}
-		if err := compileLLWithClang(clangPath, llPath, objPath, verbose); err != nil {
+		err = compileLLWithClang(clangPath, llPath, objPath, verbose)
+		if err != nil {
 			vprintf("compile ll failed: " + err.Error() + "\n")
 			vprintf("You can try manually: " + clangPath + " -c -o " + objPath + " " + llPath + "\n")
 			exit(1)
 		}
-		if err := buildRuntimeObjs(clangPath, rtEntries, verbose); err != nil {
+		err = buildRuntimeObjs(clangPath, rtEntries, verbose)
+		if err != nil {
 			vprintf("building runtime obj failed: " + err.Error() + "\n")
 			exit(1)
 		}
-		if err := linkExecutable(clangPath, output, objPath, rtEntries, verbose); err != nil {
+		err = linkExecutable(clangPath, output, objPath, rtEntries, verbose)
+		if err != nil {
 			vprintf("link failed: " + err.Error() + "\n")
 			vprintf("You can try manually: " + clangPath + " -o " + output + " " + objPath + " runtime/print.o runtime/map.o runtime/io.o\n")
 			exit(1)
@@ -146,13 +169,26 @@ func main() {
 	}
 }
 
+func fileExt(path string) string {
+	for i := len(path) - 1; i >= 0; i = i - 1 {
+		if path[i] == 46 {
+			return path[i:]
+		}
+		if path[i] == 47 || path[i] == 92 {
+			break
+		}
+	}
+	return ""
+}
+
 func deriveLLPath(output string) string {
-	ext := filepath.Ext(output)
+	ext := fileExt(output)
 	base := output
 	if ext != "" {
 		base = output[:len(output)-len(ext)]
 	}
-	return base + ".ll"
+	extLL := ".ll"
+	return base + extLL
 }
 
 func compileLLWithClang(cc, llPath, objPath string, verbose bool) error {
@@ -161,9 +197,9 @@ func compileLLWithClang(cc, llPath, objPath string, verbose bool) error {
 		vprintf("running clang to compile ll\n")
 	}
 	cmd := exec.Command(cc, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return errors.New("clang compile ll: " + err.Error() + "\n" + string(out))
+	outputRes := combinedOutputWrapper(cmd)
+	if outputRes.err != nil {
+		return errors.New("clang compile ll: " + outputRes.err.Error() + "\n" + string(outputRes.out))
 	}
 	return nil
 }
@@ -172,16 +208,16 @@ func buildRuntimeObjs(cc string, entries []struct {
 	src string
 	out string
 }, verbose bool) error {
-	for i := 0; i < len(entries); i++ {
+	for i := 0; i < len(entries); i = i + 1 {
 		entry := entries[i]
 		args := []string{"-c", "-o", entry.out, entry.src}
 		if verbose {
 			vprintf("running clang to build runtime obj\n")
 		}
 		cmd := exec.Command(cc, args...)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return errors.New("cc runtime: " + err.Error() + "\n" + string(out))
+		outputRes := combinedOutputWrapper(cmd)
+		if outputRes.err != nil {
+			return errors.New("cc runtime: " + outputRes.err.Error() + "\n" + string(outputRes.out))
 		}
 	}
 	return nil
@@ -192,16 +228,16 @@ func linkExecutable(cc, output, objPath string, rtEntries []struct {
 	out string
 }, verbose bool) error {
 	args := []string{"-o", output, objPath}
-	for i := 0; i < len(rtEntries); i++ {
+	for i := 0; i < len(rtEntries); i = i + 1 {
 		args = append(args, rtEntries[i].out)
 	}
 	if verbose {
 		vprintf("running clang to link\n")
 	}
 	cmd := exec.Command(cc, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return errors.New("link: " + err.Error() + "\n" + string(out))
+	outputRes := combinedOutputWrapper(cmd)
+	if outputRes.err != nil {
+		return errors.New("link: " + outputRes.err.Error() + "\n" + string(outputRes.out))
 	}
 	return nil
 }
@@ -217,55 +253,4 @@ func vprintf(msg string) {
 
 func exit(code int) {
 	os.Exit(code)
-}
-
-// buildDemoModule создаёт модуль с одной функцией main, вызывающей рантайм-принты.
-func buildDemoModule() *ir.Module {
-	mod := &ir.Module{
-		TargetTriple: "x86_64-pc-windows-msvc",
-		DataLayout:   "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128",
-	}
-
-	helloPtr, helloLen := addStringGlobal(mod, ".str.demo", "hello from demo")
-
-	mainFn := &ir.Function{
-		Name:    "main",
-		Params:  nil,
-		Results: nil,
-	}
-	entry := ir.NewBasicBlock("entry")
-	entry.Append(ir.Call{Name: "gominic_print", Args: []ir.Value{helloPtr, helloLen}, Ret: ir.Void})
-	entry.Append(ir.Call{Name: "gominic_printInt", Args: []ir.Value{ir.NewConstant("42", ir.I64)}, Ret: ir.Void})
-	entry.Append(ir.Call{Name: "gominic_println", Args: nil, Ret: ir.Void})
-	entry.Terminator = ir.Return{}
-	mainFn.Blocks = append(mainFn.Blocks, entry)
-	mod.AddFunction(mainFn)
-	return mod
-}
-
-// addStringGlobal кладёт приватную строку в Globals и возвращает (ptr,len).
-func addStringGlobal(mod *ir.Module, name, content string) (ptr ir.Value, length ir.Value) {
-	bytes := []byte(content)
-	enc := escapeCString(bytes)
-	arr := ir.ArrayType{Len: len(bytes) + 1, Elem: ir.I8}
-	mod.Globals = append(mod.Globals, ir.Global{
-		Name:    name,
-		Type:    arr,
-		Value:   fmt.Sprintf("c\"%s\"", enc),
-		Align:   1,
-		Private: true,
-	})
-	gep := fmt.Sprintf("getelementptr inbounds (%s, %s* @%s, i32 0, i32 0)", arr.String(), arr.String(), name)
-	ptr = ir.NewConstant(gep, ir.PtrTo(ir.I8))
-	length = ir.NewConstant(strconv.Itoa(len(bytes)), ir.I64)
-	return
-}
-
-func escapeCString(b []byte) string {
-	var sb strings.Builder
-	for _, ch := range b {
-		fmt.Fprintf(&sb, "\\%02X", ch)
-	}
-	sb.WriteString("\\00")
-	return sb.String()
 }

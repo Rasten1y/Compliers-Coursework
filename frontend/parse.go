@@ -7,9 +7,10 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"path/filepath"
+	"strings"
 )
 
-// Program bundles parsed files and type information for the rest of the pipeline.
 type Program struct {
 	Fset      *token.FileSet
 	Files     []*ast.File
@@ -18,15 +19,12 @@ type Program struct {
 	PkgName   string // original package name from source
 }
 
-// SkipSubsetCheck disables CheckUnsupported; useful for self-host builds.
 var SkipSubsetCheck bool
 
-// SetSkipSubsetCheck sets the global flag controlling unsupported checks.
 func SetSkipSubsetCheck(v bool) {
 	SkipSubsetCheck = v
 }
 
-// ParseAndCheck parses Go source files, rejects unsupported constructs, and runs type checking.
 func ParseAndCheck(filenames []string) (*Program, error) {
 	progs, err := ParseAndCheckAll(filenames)
 	if err != nil {
@@ -43,7 +41,6 @@ func ParseAndCheck(filenames []string) (*Program, error) {
 	return progs[0], nil
 }
 
-// ParseAndCheckAll parses all files and returns one Program per package.
 func ParseAndCheckAll(filenames []string) ([]*Program, error) {
 	fset := token.NewFileSet()
 	type pkgGroup struct {
@@ -60,22 +57,40 @@ func ParseAndCheckAll(filenames []string) ([]*Program, error) {
 			return nil, err
 		}
 		orig := file.Name.Name
-		key := orig
+		// При -skip-check определяем имя пакета из пути файла (для самоприменимости)
 		if SkipSubsetCheck {
-			key = "main"
-			file.Name.Name = "main"
-		}
-		found := -1
-		for i := 0; i < len(groups); i++ {
-			if groups[i].key == key {
-				found = i
-				break
+			dir := filepath.Dir(name)
+			dirName := filepath.Base(dir)
+			if dirName != "" && dirName != "." && dirName != "cmd" {
+				orig = dirName
+			}
+			if strings.Contains(name, "backend/") {
+				orig = "backend"
+			} else if strings.Contains(name, "ir/") {
+				orig = "ir"
+			} else if strings.Contains(name, "cmd/gominic/") {
+				orig = "gominic"
 			}
 		}
-		if found == -1 {
+		key := orig
+		if SkipSubsetCheck {
+			// Для самоприменимости: все файлы в группе "main", но сохраняем оригинальное имя пакета
+			key = "main"
+			file.Name.Name = "main"
 			groups = append(groups, pkgGroup{key: key, orig: orig, files: []*ast.File{file}})
 		} else {
-			groups[found].files = append(groups[found].files, file)
+			found := -1
+			for i := 0; i < len(groups); i++ {
+				if groups[i].key == key {
+					found = i
+					break
+				}
+			}
+			if found == -1 {
+				groups = append(groups, pkgGroup{key: key, orig: orig, files: []*ast.File{file}})
+			} else {
+				groups[found].files = append(groups[found].files, file)
+			}
 		}
 	}
 
@@ -93,6 +108,7 @@ func ParseAndCheckAll(filenames []string) ([]*Program, error) {
 			}
 		}
 
+		// Добавляем синтетический файл с объявлениями runtime функций для type checking
 		rtPkg := files[0].Name.Name
 		rtSrc := runtimeDeclSource(rtPkg)
 		rtFile, err := parser.ParseFile(fset, "<runtime-builtins>", rtSrc, 0)
@@ -131,7 +147,6 @@ func ParseAndCheckAll(filenames []string) ([]*Program, error) {
 	return progs, nil
 }
 
-// CheckUnsupported rejects constructs вне нашего подмножества.
 func CheckUnsupported(file *ast.File) error {
 	var err error
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -163,8 +178,7 @@ func CheckUnsupported(file *ast.File) error {
 	return err
 }
 
-// addRuntimeBuiltins registers external runtime functions in the universe scope so
-// they can be referenced without Go definitions in user code.
+// addRuntimeBuiltins: регистрирует runtime функции в universe scope для type checking
 func addRuntimeBuiltins() {
 	int64Typ := types.Typ[types.Int64]
 	byteTyp := types.Universe.Lookup("byte").Type()
@@ -235,7 +249,7 @@ func addRuntimeBuiltins() {
 	registerBuiltin("gominic_write_file", types.NewSignature(nil, pWriteFile, types.NewTuple(types.NewParam(token.NoPos, nil, "", boolTyp)), false))
 }
 
-// runtimeDeclSource returns a minimal Go source with stubs for runtime externs to satisfy type checking.
+// runtimeDeclSource: генерирует Go код с заглушками runtime функций для type checking
 func runtimeDeclSource(pkg string) string {
 	return fmt.Sprintf(`package %s
 
@@ -253,7 +267,6 @@ func gominic_write_file(path *byte, pathLen int64, data *byte, dataLen int64) bo
 `, pkg)
 }
 
-// registerBuiltin inserts a function into the universe scope if not present.
 func registerBuiltin(name string, sig *types.Signature) {
 	if obj := types.Universe.Lookup(name); obj == nil {
 		types.Universe.Insert(types.NewFunc(token.NoPos, nil, name, sig))

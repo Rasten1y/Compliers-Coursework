@@ -7,7 +7,6 @@ import (
 	"gominic/ir"
 )
 
-// BuildModule lowers all packages into a single IR module.
 func BuildModule(progs []*Program) (*ir.Module, error) {
 	triple, layout := defaultTarget()
 	mod := &ir.Module{
@@ -22,7 +21,6 @@ func BuildModule(progs []*Program) (*ir.Module, error) {
 	return mod, nil
 }
 
-// BuildIR builds a module for a single package (legacy helper).
 func BuildIR(prog *Program) (*ir.Module, error) {
 	triple, layout := defaultTarget()
 	mod := &ir.Module{
@@ -35,21 +33,20 @@ func BuildIR(prog *Program) (*ir.Module, error) {
 	return mod, nil
 }
 
+// defaultTarget: определяет target triple и datalayout в зависимости от ОС
 func defaultTarget() (string, string) {
 	if runtime.GOOS == "windows" {
-		// MSVC-style triple; datalayout matches clang-cl defaults.
 		return "x86_64-pc-windows-msvc", "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
 	}
-	// Fallback to Linux defaults.
 	return "x86_64-pc-linux-gnu", "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
 }
 
-// buildInto lowers a single package into an existing module.
 func buildInto(prog *Program, mod *ir.Module) error {
 	l := &lowerer{
 		prog: prog,
 		mod:  mod,
 	}
+	// Префикс пакета нужен для генерации правильных имён функций (pkg.FuncName)
 	if prog.PkgName != "" && prog.PkgName != "main" {
 		l.prefix = prog.PkgName + "."
 	}
