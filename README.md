@@ -116,7 +116,7 @@ clang -o subset_example.exe subset_example.o runtime\print.c runtime\map.c runti
 go build -o gominic.exe ./cmd/gominic
 ```
 ```
-.\gominic.exe -skip-check -S -v backend\llvm.go ir\ir.go > llvm.ll
+.\gominic.exe -S -v backend\llvm.go ir\ir.go > llvm.ll
 ```
 ```
 clang -c -o llvm.o llvm.ll
