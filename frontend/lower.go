@@ -124,7 +124,9 @@ func (l *lowerer) lowerGlobals(decls []ast.Decl) error {
 // FuncDecl = "func" ident "(" [ ParamList ] ")" [ Result ] Block
 // ParamList = Param { "," Param }
 // Param = ident Type
-// Result = Type | "(" Type ")"
+// Result = SingleResult | TupleResult
+// SingleResult = Type
+// TupleResult = "(" Type [ "," Type ] ")"
 func (l *lowerer) lowerFunc(fnDecl *ast.FuncDecl) error {
 	sig, ok := l.prog.TypesInfo.Defs[fnDecl.Name].Type().(*types.Signature)
 	if !ok {
@@ -273,6 +275,11 @@ func (l *lowerer) lowerStmt(s ast.Stmt) error {
 	case *ast.ExprStmt:
 		_, err := l.lowerExpr(st.X)
 		return err
+	// ReturnStmt = "return" [ ReturnValues ]
+	// ReturnValues = EmptyReturn | SingleReturn | TupleReturn
+	// EmptyReturn = .
+	// SingleReturn = Expr
+	// TupleReturn = Expr "," Expr
 	case *ast.ReturnStmt:
 		var vals []*ir.Value
 		for i := 0; i < len(st.Results); i++ {
@@ -391,7 +398,7 @@ func (l *lowerer) lowerBranch(st *ast.BranchStmt) error {
 	return nil
 }
 
-// AssignStmt = ExprList "=" ExprList
+// AssignStmt = ExprList ( "=" | ":=" ) ExprList
 func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 	if st.Tok != token.ASSIGN && st.Tok != token.DEFINE {
 		return fmt.Errorf("unsupported assign tok %s", st.Tok.String())
@@ -2683,6 +2690,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 		}
 	}
 	// builtins: len/make/append
+	// append поддерживается только с 2 аргументами: append(slice, elem)
 	if fnIdent.Name == "len" {
 		return l.lowerBuiltinLen(c.Args)
 	}
@@ -2981,6 +2989,7 @@ func (l *lowerer) lowerBuiltinMake(args []ast.Expr) (*ir.Value, error) {
 	return nil, fmt.Errorf("make unsupported type")
 }
 
+// append поддерживается только с 2 аргументами: append(slice, elem)
 func (l *lowerer) lowerBuiltinAppend(args []ast.Expr) (*ir.Value, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("append: want 2 args")
