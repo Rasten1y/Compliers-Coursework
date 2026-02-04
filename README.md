@@ -10,72 +10,130 @@
 - Не поддерживается: `go`, `defer`, `select`, `switch`, `type switch`, функциональные литералы, `range`, `goto`, метки, `if` с init statement, `append` с более чем одним элементом, интерфейсы, каналы.
 
 ## Лексическая структура
-- Идентификаторы: `[A-Za-z_][A-Za-z0-9_]*`
-- Ключевые слова: `package` | `import` | `var` | `const` | `type` | `func` | `return` | `if` | `else` | `for` | `break` | `continue` | `true` | `false` | `len` | `make` | `append`
-- Целые числа: `[0-9]+`
-- Числа с плавающей точкой: `[0-9]+ \. [0-9]+`
-- Строковые литералы: `"` [^"\n]* `"`
+- Идентификаторы: `[\p{L}_][\p{L}\p{N}_]*` (буквенные и цифровые символы Юникода; допустим `_`, идентификатор не начинается с цифры)
+- Ключевые слова: `package` | `import` | `var` | `const` | `type` | `func` | `return` | `if` | `else` | `for` | `break` | `continue` | `struct` | `map`
 - Булевы литералы: `true` | `false`
+- Предопределённые идентификаторы (встроенные): `len` | `make` | `append`
+- Целые числа: `[0-9]+`
+- Числа с плавающей точкой: `[0-9]+\.[0-9]+`
+- Строковые литералы: `"` [^"\n]* `"`
 - Операторы: `+` | `-` | `*` | `/` | `%` | `==` | `!=` | `<` | `<=` | `>` | `>=` | `&&` | `||` | `!` | `&` | `|` | `<<` | `>>` | `=` | `:=`
 - Разделители: `;` | `,` | `.` | `:` | `(` | `)` | `{` | `}` | `[` | `]`
 - Комментарии: `//` [^\n]* `\n` | `/*` .* `*/`
 
+
 ## Грамматика (EBNF)
 ```
-Program        = "package" ident { ImportDecl } { TopDecl } .
-ImportDecl     = "import" string_lit .
-TopDecl        = FuncDecl | VarDecl | ConstDecl | TypeDecl .
+Program        = "package" , ident , { ImportDecl } , { TopDecl } ;
 
-FuncDecl       = "func" ident "(" [ ParamList ] ")" [ Result ] Block .
-ParamList      = Param { "," Param } .
-Param          = ident Type .
-Result         = SingleResult | TupleResult .
-SingleResult   = Type .
-TupleResult    = "(" Type [ "," Type ] ")" .
+ImportDecl     = "import" , string_lit ;
 
-VarDecl        = "var" ident [ Type ] [ "=" Expr ] .
-ConstDecl      = "const" ident "=" Expr .
-TypeDecl       = "type" ident Type .
+TopDecl        = FuncDecl | VarDecl | ConstDecl | TypeDecl ;
 
-Block          = "{" { Stmt } "}" .
-Stmt           = DeclStmt | AssignStmt | IfStmt | ForStmt | ReturnStmt
-               | ExprStmt | BreakStmt | ContinueStmt .
-DeclStmt       = VarDecl .
-AssignStmt     = ExprList ( "=" | ":=" ) ExprList .
-IfStmt         = "if" Expr Block [ "else" Block ] .
-ForStmt        = "for" ( [ SimpleStmt ] ";" [ Expr ] ";" [ SimpleStmt ] | Expr | ) Block .
-SimpleStmt     = AssignStmt | ExprStmt .
-ReturnStmt     = "return" [ ReturnValues ] .
-ReturnValues   = EmptyReturn | SingleReturn | TupleReturn .
-EmptyReturn    = .
-SingleReturn   = Expr .
-TupleReturn    = Expr "," Expr .
-BreakStmt      = "break" .
-ContinueStmt   = "continue" .
-ExprStmt       = CallExpr .
+FuncDecl       = "func" , [ Receiver ] , ident , "(" , [ ParamList ] , ")" , [ Result ] , Block ;
+Receiver       = "(" , ident , Type , ")" ;
 
-Expr           = BinaryExpr | UnaryExpr | PrimaryExpr .
-BinaryExpr     = Expr BinOp Expr .
-BinOp          = "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" | "&" | "|" | "<<" | ">>" .
-UnaryExpr      = ("+" | "-" | "!") Expr .
-PrimaryExpr    = ident | literal | "(" Expr ")" | Selector | Index | Slice | Call .
-Selector       = PrimaryExpr "." ident .
-Index          = PrimaryExpr "[" Expr "]" .
-Slice          = PrimaryExpr "[" [ Expr ] ":" [ Expr ] "]" .
-Call           = PrimaryExpr "(" [ CallArgs ] ")" .
-CallArgs       = Expr { "," Expr } .
-ExprList       = Expr { "," Expr } .
+ParamList      = Param , { "," , Param } ;
+Param          = ident , Type ;
 
-Type           = BasicType | PointerType | ArrayType | SliceType | StructType | MapType .
-BasicType      = "bool" | "int" | "int32" | "int64" | "uint32" | "uint64" | "float64" | "string" | ident .
-PointerType    = "*" Type .
-ArrayType      = "[" integer "]" Type .
-SliceType      = "[]" Type .
-StructType     = "struct" "{" { FieldDecl } "}" .
-FieldDecl      = ident Type .
-MapType        = "map" "[" Type "]" Type .
-literal        = int_lit | float_lit | string_lit | boolean_lit .
-boolean_lit    = "true" | "false" .
+Result         = Type | "(" , Type , [ "," , Type ] , ")" ;
+
+VarDecl        = "var" , ident , [ Type ] , [ "=" , Expr ] ;
+ConstDecl      = "const" , ident , "=" , Expr ;
+TypeDecl       = "type" , ident , Type ;
+
+Block          = "{" , { Stmt } , "}" ;
+
+Stmt           = DeclStmt
+               | AssignStmt
+               | IfStmt
+               | ForStmt
+               | ReturnStmt
+               | ExprStmt
+               | BreakStmt
+               | ContinueStmt ;
+
+DeclStmt       = VarDecl ;
+
+AssignStmt     = LhsList , ( "=" | ":=" ) , ExprList ;
+LhsList        = Lhs , { "," , Lhs } ;
+Lhs            = PrimaryExpr ;
+ExprList       = Expr , { "," , Expr } ;
+
+IfStmt         = "if" , Expr , Block , [ "else" , Block ] ;
+
+ForStmt        = "for" , ( ForClause | Expr | ) , Block ;
+ForClause      = [ SimpleStmt ] , ";" , [ Expr ] , ";" , [ SimpleStmt ] ;
+SimpleStmt     = AssignStmt | ExprStmt ;
+
+ReturnStmt     = "return" , [ ReturnValues ] ;
+ReturnValues   = Expr | Expr , "," , Expr ;
+
+BreakStmt      = "break" ;
+ContinueStmt   = "continue" ;
+
+ExprStmt       = Call ;  
+
+Expr           = OrExpr ;
+
+OrExpr         = AndExpr , { "||" , AndExpr } ;
+AndExpr        = CmpExpr , { "&&" , CmpExpr } ;
+
+CmpExpr        = AddExpr , { CmpOp , AddExpr } ;
+CmpOp          = "==" | "!=" | "<" | "<=" | ">" | ">=" ;
+
+AddExpr        = MulExpr , { AddOp , MulExpr } ;
+AddOp          = "+" | "-" | "|" ;
+
+MulExpr        = UnaryExpr , { MulOp , UnaryExpr } ;
+MulOp          = "*" | "/" | "%" | "&" | "<<" | ">>" ;
+
+UnaryExpr      = { UnaryOp } , PrimaryExpr ;
+UnaryOp        = "+" | "-" | "!" ;
+
+PrimaryExpr    = Operand , { Selector | Index | Slice | Call } ;
+
+Operand        = ident | literal | "(" , Expr , ")" ;
+
+Selector       = "." , ident ;
+Index          = "[" , Expr , "]" ;
+Slice          = "[" , [ Expr ] , ":" , [ Expr ] , "]" ;
+
+Call           = "(" , [ CallArgs ] , ")" ;
+CallArgs       = Expr , { "," , Expr } ;
+
+Type           = BasicType | PointerType | ArrayType | SliceType | StructType | MapType ;
+
+BasicType      = "bool" | "int" | "int32" | "int64" | "uint32" | "uint64" | "float64" | "string" | ident ;
+PointerType    = "*" , Type ;
+ArrayType      = "[" , integer , "]" , Type ;
+SliceType      = "[" , "]" , Type ;
+StructType     = "struct" , "{" , { FieldDecl } , "}" ;
+FieldDecl      = ident , Type ;
+MapType        = "map" , "[" , Type , "]" , Type ;
+
+literal        = int_lit | float_lit | string_lit | boolean_lit ;
+boolean_lit    = "true" | "false" ;
+
+int_lit        = dec_digit , { dec_digit } ;
+float_lit      = dec_digit , { dec_digit } , "." , dec_digit , { dec_digit } ;
+
+string_lit     = DQUOTE , { string_char } , DQUOTE ;
+string_char    = Any \ { DQUOTE | LF } ;
+
+integer        = int_lit ;
+
+ident          = ident_start , { ident_continue } ;
+ident_start    = AnyLetter | "_" ;
+ident_continue = AnyLetter | AnyDigit | "_" ;
+
+dec_digit      = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+DQUOTE         = "\"" ;
+LF             = "\n" ;
+
+Any — произвольный символ Юникода.
+AnyLetter — любой буквенный символ Юникода.
+AnyDigit — любой десятичный цифровой символ Юникода .
 ```
 
 ### Сборка и запуск (.ll → .o → .exe)
