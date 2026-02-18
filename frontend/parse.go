@@ -7,8 +7,6 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
-	"path/filepath"
-	"strings"
 )
 
 type Program struct {
@@ -16,13 +14,7 @@ type Program struct {
 	Files     []*ast.File
 	TypesInfo *types.Info
 	TypesPkg  *types.Package
-	PkgName   string // original package name from source
-}
-
-var SkipSubsetCheck bool
-
-func SetSkipSubsetCheck(v bool) {
-	SkipSubsetCheck = v
+	PkgName   string // Исходное имя пакета из исходников.
 }
 
 func ParseAndCheck(filenames []string) (*Program, error) {
@@ -57,40 +49,19 @@ func ParseAndCheckAll(filenames []string) ([]*Program, error) {
 			return nil, err
 		}
 		orig := file.Name.Name
-		// При -skip-check определяем имя пакета из пути файла (для самоприменимости)
-		if SkipSubsetCheck {
-			dir := filepath.Dir(name)
-			dirName := filepath.Base(dir)
-			if dirName != "" && dirName != "." && dirName != "cmd" {
-				orig = dirName
-			}
-			if strings.Contains(name, "backend/") {
-				orig = "backend"
-			} else if strings.Contains(name, "ir/") {
-				orig = "ir"
-			} else if strings.Contains(name, "cmd/gominic/") {
-				orig = "gominic"
+		key := orig
+
+		found := -1
+		for i := 0; i < len(groups); i++ {
+			if groups[i].key == key {
+				found = i
+				break
 			}
 		}
-		key := orig
-		if SkipSubsetCheck {
-			// Для самоприменимости: все файлы в группе "main", но сохраняем оригинальное имя пакета
-			key = "main"
-			file.Name.Name = "main"
+		if found == -1 {
 			groups = append(groups, pkgGroup{key: key, orig: orig, files: []*ast.File{file}})
 		} else {
-			found := -1
-			for i := 0; i < len(groups); i++ {
-				if groups[i].key == key {
-					found = i
-					break
-				}
-			}
-			if found == -1 {
-				groups = append(groups, pkgGroup{key: key, orig: orig, files: []*ast.File{file}})
-			} else {
-				groups[found].files = append(groups[found].files, file)
-			}
+			groups[found].files = append(groups[found].files, file)
 		}
 	}
 
@@ -100,15 +71,13 @@ func ParseAndCheckAll(filenames []string) ([]*Program, error) {
 	for i := 0; i < len(groups); i++ {
 		pkgName := groups[i].orig
 		files := groups[i].files
-		if !SkipSubsetCheck {
-			for j := 0; j < len(files); j++ {
-				if err := CheckUnsupported(files[j]); err != nil {
-					return nil, err
-				}
+		for j := 0; j < len(files); j++ {
+			if err := CheckUnsupported(files[j]); err != nil {
+				return nil, err
 			}
 		}
 
-		// Добавляем синтетический файл с объявлениями runtime функций для type checking
+		// Добавляем синтетический файл с объявлениями runtime-функций для type checking.
 		rtPkg := files[0].Name.Name
 		rtSrc := runtimeDeclSource(rtPkg)
 		rtFile, err := parser.ParseFile(fset, "<runtime-builtins>", rtSrc, 0)
@@ -178,7 +147,7 @@ func CheckUnsupported(file *ast.File) error {
 	return err
 }
 
-// addRuntimeBuiltins: регистрирует runtime функции в universe scope для type checking
+// addRuntimeBuiltins: регистрирует runtime-функции для type checking.
 func addRuntimeBuiltins() {
 	int64Typ := types.Typ[types.Int64]
 	byteTyp := types.Universe.Lookup("byte").Type()
@@ -209,7 +178,7 @@ func addRuntimeBuiltins() {
 	rMake := types.NewTuple(types.NewParam(token.NoPos, nil, "", ptrByte))
 	registerBuiltin("gominic_makeSlice", types.NewSignature(nil, pMake, rMake, false))
 
-	// map runtime
+	// Функции runtime для map.
 	pMapNew := types.NewTuple(
 		types.NewParam(token.NoPos, nil, "keySize", int64Typ),
 		types.NewParam(token.NoPos, nil, "valSize", int64Typ),
@@ -236,7 +205,7 @@ func addRuntimeBuiltins() {
 	pMapLen := types.NewTuple(types.NewParam(token.NoPos, nil, "m", ptrByte))
 	registerBuiltin("gominic_map_len", types.NewSignature(nil, pMapLen, types.NewTuple(types.NewParam(token.NoPos, nil, "", int64Typ)), false))
 
-	// self-host I/O helpers
+	// I/O-хелперы для самоприменимости.
 	registerBuiltin("gominic_argc", types.NewSignature(nil, types.NewTuple(), types.NewTuple(types.NewParam(token.NoPos, nil, "", int64Typ)), false))
 	pArgv := types.NewTuple(types.NewParam(token.NoPos, nil, "idx", int64Typ))
 	registerBuiltin("gominic_argv", types.NewSignature(nil, pArgv, types.NewTuple(types.NewParam(token.NoPos, nil, "", strTyp)), false))
@@ -249,7 +218,7 @@ func addRuntimeBuiltins() {
 	registerBuiltin("gominic_write_file", types.NewSignature(nil, pWriteFile, types.NewTuple(types.NewParam(token.NoPos, nil, "", boolTyp)), false))
 }
 
-// runtimeDeclSource: генерирует Go код с заглушками runtime функций для type checking
+// runtimeDeclSource: генерирует заглушки runtime-функций для type checking.
 func runtimeDeclSource(pkg string) string {
 	return fmt.Sprintf(`package %s
 

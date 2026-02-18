@@ -132,15 +132,15 @@ func (l *lowerer) lowerFunc(fnDecl *ast.FuncDecl) error {
 	if !ok {
 		return fmt.Errorf("func %s: no signature", fnDecl.Name.Name)
 	}
-	// Support multiple returns for self-hosting (functions returning (T, error))
+	// Для самоприменимости поддерживаем множественный возврат только формы (T, error).
 	if sig.Results().Len() > 1 {
-		// For now, only support (T, error) pattern
+		// Сейчас поддерживаем только форму (T, error).
 		if sig.Results().Len() == 2 {
-			// Check if second result is error type
+			// Проверяем, что второй результат имеет тип error.
 			if errType, ok := sig.Results().At(1).Type().(*types.Named); ok {
 				if errType.Obj() != nil && errType.Obj().Name() == "error" {
-					// This is (T, error) pattern - supported for self-hosting
-					// We'll return only the first value, error handling is done separately
+					// Это форма (T, error), она поддерживается.
+					// Возвращаем только первое значение, error обрабатывается отдельно.
 				} else {
 					return fmt.Errorf("unsupported: multiple returns (not (T, error) pattern)")
 				}
@@ -153,11 +153,11 @@ func (l *lowerer) lowerFunc(fnDecl *ast.FuncDecl) error {
 	}
 
 	fnName := fnDecl.Name.Name
-	// Special case: main function should always be named "main" (no package prefix)
+	// Спецслучай: функция main всегда называется "main" без префикса пакета.
 	if fnName == "main" {
 		fnName = "main"
 	} else if sig.Recv() != nil {
-		// If this is a method (has receiver), add type name prefix
+		// Если это метод (есть receiver), добавляем префикс с именем типа.
 		recvType := sig.Recv().Type()
 		typeName := ""
 		if named, ok := recvType.(*types.Named); ok {
@@ -179,13 +179,13 @@ func (l *lowerer) lowerFunc(fnDecl *ast.FuncDecl) error {
 			fnName = typeName + "." + fnName
 		}
 	} else {
-		// For package functions, add package prefix if not main package
-		// Check if function is exported (starts with uppercase) and package is not main
+		// Для функций пакета добавляем префикс, если это не main.
+		// Если функция экспортируемая и пакет не main, добавляем префикс пакета.
 		if l.prefix != "" {
 			fnName = l.prefix + fnName
 		} else if len(fnName) > 0 && fnName[0] >= 65 && fnName[0] <= 90 {
-			// Function is exported (starts with uppercase)
-			// Get package name from prog
+			// Функция экспортируемая.
+			// Берём имя пакета из prog.
 			if l.prog != nil && l.prog.PkgName != "" && l.prog.PkgName != "main" {
 				fnName = l.prog.PkgName + "." + fnName
 			}
@@ -265,7 +265,8 @@ func (l *lowerer) lowerBlock(b *ast.BlockStmt) error {
 }
 
 // Stmt = DeclStmt | AssignStmt | IfStmt | ForStmt | ReturnStmt
-//      | ExprStmt | BreakStmt | ContinueStmt
+//
+//	| ExprStmt | BreakStmt | ContinueStmt
 func (l *lowerer) lowerStmt(s ast.Stmt) error {
 	switch st := s.(type) {
 	case *ast.BlockStmt:
@@ -283,7 +284,7 @@ func (l *lowerer) lowerStmt(s ast.Stmt) error {
 	case *ast.ReturnStmt:
 		var vals []*ir.Value
 		for i := 0; i < len(st.Results); i++ {
-			// Check if return value is nil identifier before lowering
+			// Проверяем, что возвращаемое значение — это идентификатор nil.
 			isNilIdent := false
 			if ident, ok := st.Results[i].(*ast.Ident); ok && ident.Name == "nil" {
 				isNilIdent = true
@@ -292,11 +293,11 @@ func (l *lowerer) lowerStmt(s ast.Stmt) error {
 			if err != nil {
 				return err
 			}
-			// If return value is nil and function expects slice, create zero slice
+			// Если возвращается nil, а функция ждёт срез, создаём нулевой срез.
 			if l.fn != nil && i < len(l.fn.Results) {
 				expectedTy := l.fn.Results[i]
 				if expectedTy.Kind == ir.KindSlice && isNilIdent {
-					// Create zero slice: { ptr null, i64 0, i64 0 }
+					// Нулевой срез: { null, 0, 0 }.
 					elemPtrTy := ir.PtrTo(expectedTy.Elem)
 					zeroPtr := ir.NewConstant("null", elemPtrTy)
 					zeroLen := ir.NewConstant("0", ir.I64)
@@ -403,22 +404,22 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 	if st.Tok != token.ASSIGN && st.Tok != token.DEFINE {
 		return fmt.Errorf("unsupported assign tok %s", st.Tok.String())
 	}
-	// special case: map get with two results
+	// Спецслучай: чтение из map с двумя результатами.
 	if len(st.Lhs) == 2 && len(st.Rhs) == 1 {
 		if idx, ok := st.Rhs[0].(*ast.IndexExpr); ok {
 			if _, okm := l.prog.TypesInfo.TypeOf(idx.X).Underlying().(*types.Map); okm {
 				return l.lowerMapGet(idx, st.Lhs[0], st.Lhs[1], st.Tok == token.DEFINE)
 			}
 		}
-		// Also handle function calls that return 2 values
+		// Также обрабатываем вызовы функций с двумя результатами.
 		if call, ok := st.Rhs[0].(*ast.CallExpr); ok {
-			// Try to get function signature from various sources
+			// Пробуем получить сигнатуру функции из доступных источников.
 			var sig *types.Signature
 			callType := l.prog.TypesInfo.TypeOf(call)
 			if sig2, ok := callType.(*types.Signature); ok {
 				sig = sig2
 			} else {
-				// Try to get from function identifier
+				// Пробуем получить сигнатуру из идентификатора функции.
 				if fnIdent, ok := call.Fun.(*ast.Ident); ok {
 					if obj, ok := l.prog.TypesInfo.Uses[fnIdent]; ok {
 						if fn, ok := obj.(*types.Func); ok {
@@ -431,7 +432,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 							sig = fn.Type().(*types.Signature)
 						}
 					}
-					// Also try Selections for method calls
+					// Также пробуем Selections для вызовов методов.
 					if sel, ok := l.prog.TypesInfo.Selections[selExpr]; ok {
 						if fn := sel.Obj(); fn != nil {
 							if fn2, ok := fn.(*types.Func); ok {
@@ -442,7 +443,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 				}
 			}
 			if sig != nil && sig.Results().Len() == 2 {
-				// Function returns 2 values - handle it
+				// Если функция возвращает 2 значения, обрабатываем их отдельно.
 				firstVal, err := l.lowerCall(call)
 				if err != nil {
 					return err
@@ -455,7 +456,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 						return err
 					}
 				}
-				// Handle first LHS
+				// Обрабатываем первый LHS.
 				lhs0Val, err := l.lowerExpr(st.Lhs[0])
 				if err != nil {
 					if st.Tok == token.DEFINE {
@@ -471,7 +472,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 				} else {
 					l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: firstVal, StoreDst: lhs0Val, StoreAlign: alignOfIRType(firstTy)})
 				}
-				// Handle second LHS (error or second return value)
+				// Обрабатываем второй LHS (обычно error).
 				returnTy, err := goTypeToIR(sig.Results().At(1).Type())
 				if err != nil {
 					return err
@@ -505,38 +506,38 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 			}
 		}
 	}
-	// Support multiple assignment for functions returning multiple values
-	// Handle (T, error) pattern and other multi-return patterns
+	// Поддержка множественного присваивания из функции с несколькими результатами.
+	// Обрабатываем (T, error) и похожие случаи множественного возврата.
 	if len(st.Rhs) == 1 {
-		// Check if RHS is a function call returning multiple values
+		// Проверяем, что RHS — вызов функции с несколькими результатами.
 		if call, ok := st.Rhs[0].(*ast.CallExpr); ok {
 			callType := l.prog.TypesInfo.TypeOf(call)
 			if sig, ok := callType.(*types.Signature); ok {
 				numReturns := sig.Results().Len()
-				// Handle case when function returns multiple values
+				// Обрабатываем случай, когда функция возвращает несколько значений.
 				if numReturns > 1 {
-					// If we have exactly as many LHS as returns, assign all
+					// Если число LHS равно числу результатов, присваиваем все.
 					if numReturns == len(st.Lhs) {
-						// Function returns exactly as many values as we have LHS variables
-						// Lower the call to get the first value
+						// Количество результатов совпадает с количеством LHS.
+						// Понижаем вызов и получаем первое значение.
 						firstVal, err := l.lowerCall(call)
 						if err != nil {
 							return err
 						}
-						// Assign first value to first LHS
+						// Записываем первое значение в первый LHS.
 						firstTy := firstVal.Type()
 						if firstTy == nil && numReturns > 0 {
-							// Get type from signature
+							// Берём тип из сигнатуры.
 							firstGoTy := sig.Results().At(0).Type()
 							firstTy, err = goTypeToIR(firstGoTy)
 							if err != nil {
 								return err
 							}
 						}
-						// Handle first LHS
+						// Обрабатываем первый LHS.
 						lhs0Val, err := l.lowerExpr(st.Lhs[0])
 						if err != nil {
-							// LHS doesn't exist yet, need to create it
+							// LHS ещё не существует, создаём его.
 							if st.Tok == token.DEFINE {
 								lhs0Ident, ok := st.Lhs[0].(*ast.Ident)
 								if !ok {
@@ -548,17 +549,17 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 								return err
 							}
 						} else {
-							// LHS exists, assign to it
+							// LHS уже существует, выполняем присваивание.
 							l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: firstVal, StoreDst: lhs0Val, StoreAlign: alignOfIRType(firstTy)})
 						}
-						// Handle remaining LHS variables (for multi-return functions)
+						// Обрабатываем остальные LHS для множественного возврата.
 						for i := 1; i < len(st.Lhs); i++ {
 							returnTy, err := goTypeToIR(sig.Results().At(i).Type())
 							if err != nil {
 								return err
 							}
-							// For now, assign zero/nil values to remaining variables
-							// In a real implementation, we'd need to extract all return values
+							// Пока заполняем остальные переменные нулевыми значениями.
+							// В полной реализации нужно извлекать все возвращаемые значения.
 							var zeroVal *ir.Value
 							if returnTy.Kind == ir.KindPointer {
 								zeroVal = ir.NewConstant("null", returnTy)
@@ -571,7 +572,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 							}
 							lhsVal, err := l.lowerExpr(st.Lhs[i])
 							if err != nil {
-								// LHS doesn't exist yet, need to create it
+								// LHS ещё не существует, создаём его.
 								if st.Tok == token.DEFINE {
 									lhsIdent, ok := st.Lhs[i].(*ast.Ident)
 									if !ok {
@@ -583,21 +584,21 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 									return err
 								}
 							} else {
-								// LHS exists, assign to it
+								// LHS уже существует, выполняем присваивание.
 								l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: zeroVal, StoreDst: lhsVal, StoreAlign: alignOfIRType(returnTy)})
 							}
 						}
 						return nil
 					} else if len(st.Lhs) > 0 && len(st.Lhs) < numReturns {
-						// If we have fewer LHS than returns, assign only first value(s)
-						// Function returns more values than we assign - use first N values
+						// Если LHS меньше, чем результатов, присваиваем только первые.
+						// Функция вернула больше значений, используем первые N.
 						for i := 0; i < len(st.Lhs); i++ {
 							returnTy, err := goTypeToIR(sig.Results().At(i).Type())
 							if err != nil {
 								return err
 							}
-							// For now, we'll call the function once and use the first return value
-							// Then assign zero values to remaining LHS
+							// Пока вызываем функцию один раз и используем первое значение.
+							// Затем заполняем остальные LHS нулевыми значениями.
 							if i == 0 {
 								firstVal, err := l.lowerCall(call)
 								if err != nil {
@@ -623,7 +624,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 									l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: firstVal, StoreDst: lhsVal, StoreAlign: alignOfIRType(firstTy)})
 								}
 							} else {
-								// Assign zero values to remaining LHS
+								// Присваиваем нули оставшимся LHS.
 								var zeroVal *ir.Value
 								if returnTy.Kind == ir.KindPointer {
 									zeroVal = ir.NewConstant("null", returnTy)
@@ -653,7 +654,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 						}
 						return nil
 					} else if len(st.Lhs) == 1 && numReturns > 1 {
-						// If we have one LHS and function returns multiple values, use first
+						// Если LHS один, а значений несколько, берём первое.
 						firstVal, err := l.lowerCall(call)
 						if err != nil {
 							return err
@@ -663,7 +664,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 							return fmt.Errorf("unsupported lhs")
 						}
 						if lhs.Name == "_" {
-							// evaluate for side-effects only
+							// вычисляем только ради побочных эффектов
 							return nil
 						}
 						rhsTy := firstVal.Type()
@@ -686,23 +687,23 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 						}
 						return nil
 					} else if len(st.Lhs) == 0 && numReturns > 0 {
-						// If we have zero LHS, just evaluate for side effects
+						// Если LHS нет, вычисляем только ради побочных эффектов.
 						_, err := l.lowerCall(call)
 						return err
 					}
-					// If numReturns == 1 and len(st.Lhs) == 1, fall through to normal handling
+					// Если возвращается одно значение и LHS один, идём в обычную ветку.
 				}
 			} else if callType == nil {
-				// TypeOf returned nil - try to get type from the function itself
-				// This can happen with some function calls
+				// TypeOf вернул nil, пробуем взять тип из функции.
+				// Такое бывает у некоторых вызовов.
 				if fnIdent, ok := call.Fun.(*ast.Ident); ok {
 					if obj, ok := l.prog.TypesInfo.Uses[fnIdent]; ok {
 						if fn, ok := obj.(*types.Func); ok {
 							sig := fn.Type().(*types.Signature)
 							numReturns := sig.Results().Len()
-							// Handle multiple returns even when TypeOf(call) is nil
+							// Обрабатываем множественный возврат даже при nil в TypeOf(call).
 							if numReturns > 1 && numReturns == len(st.Lhs) {
-								// Same handling as above
+								// Дальше логика такая же.
 								firstVal, err := l.lowerCall(call)
 								if err != nil {
 									return err
@@ -766,13 +767,13 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 						}
 					}
 				} else if selExpr, ok := call.Fun.(*ast.SelectorExpr); ok {
-					// Try to get type from selector expression
+					// Пробуем получить тип из selector-выражения.
 					if obj, ok := l.prog.TypesInfo.Uses[selExpr.Sel]; ok {
 						if fn, ok := obj.(*types.Func); ok {
 							sig := fn.Type().(*types.Signature)
 							numReturns := sig.Results().Len()
 							if numReturns > 1 && numReturns == len(st.Lhs) {
-								// Same handling as above
+								// Дальше логика такая же.
 								firstVal, err := l.lowerCall(call)
 								if err != nil {
 									return err
@@ -840,7 +841,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 		}
 	}
 	if len(st.Lhs) != len(st.Rhs) {
-		// Provide more context in error message
+		// Добавляем больше контекста в ошибку
 		lhsStr := fmt.Sprintf("%d", len(st.Lhs))
 		rhsStr := fmt.Sprintf("%d", len(st.Rhs))
 		if len(st.Rhs) == 1 {
@@ -854,12 +855,12 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 		return fmt.Errorf("unsupported: assign arity mismatch: LHS=%s, RHS=%s", lhsStr, rhsStr)
 	}
 	for i := 0; i < len(st.Lhs); i++ {
-		// map set?
+		// присваивание в map?
 		if idx, ok := st.Lhs[i].(*ast.IndexExpr); ok {
 			if _, okm := l.prog.TypesInfo.TypeOf(idx.X).Underlying().(*types.Map); okm {
 				return l.lowerMapSet(idx, st.Rhs[i])
 			}
-			// Handle array/slice element assignment: arr[i] = value or slice[i] = value
+			// Присваивание в элемент массива/среза: arr[i] = value.
 			rhsVal, err := l.lowerExpr(st.Rhs[i])
 			if err != nil {
 				return err
@@ -871,7 +872,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 			l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: rhsVal, StoreDst: elemPtr, StoreAlign: alignOfIRType(rhsVal.Type())})
 			continue
 		}
-		// Handle struct field assignment: s.field = value
+		// Присваивание в поле структуры: s.field = value.
 		if selExpr, ok := st.Lhs[i].(*ast.SelectorExpr); ok {
 			rhsVal, err := l.lowerExpr(st.Rhs[i])
 			if err != nil {
@@ -884,7 +885,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 			l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: rhsVal, StoreDst: fieldPtr, StoreAlign: alignOfIRType(rhsVal.Type())})
 			continue
 		}
-		// Handle pointer dereference assignment: *ptr = value
+		// Присваивание по разыменованию: *ptr = value.
 		if starExpr, ok := st.Lhs[i].(*ast.StarExpr); ok {
 			rhsVal, err := l.lowerExpr(st.Rhs[i])
 			if err != nil {
@@ -905,7 +906,7 @@ func (l *lowerer) lowerAssign(st *ast.AssignStmt) error {
 			return fmt.Errorf("unsupported lhs type %T", st.Lhs[i])
 		}
 		if lhs.Name == "_" {
-			// evaluate RHS for side-effects only
+			// Вычисляем RHS только ради побочных эффектов.
 			if _, err := l.lowerExpr(st.Rhs[i]); err != nil {
 				return err
 			}
@@ -944,7 +945,7 @@ func (l *lowerer) lowerIf(st *ast.IfStmt) error {
 
 	l.block.Terminator = &ir.Instruction{Kind: ir.InstrCondBr, CondCond: cond, CondTrue: thenBB.Name, CondFalse: elseBB.Name}
 
-	// then
+	// ветка then
 	l.block = thenBB
 	if err := l.lowerStmt(st.Body); err != nil {
 		return err
@@ -953,7 +954,7 @@ func (l *lowerer) lowerIf(st *ast.IfStmt) error {
 		l.block.Terminator = &ir.Instruction{Kind: ir.InstrBr, BrTarget: mergeBB.Name}
 	}
 
-	// else
+	// ветка else
 	l.block = elseBB
 	if st.Else != nil {
 		if err := l.lowerStmt(st.Else); err != nil {
@@ -964,7 +965,7 @@ func (l *lowerer) lowerIf(st *ast.IfStmt) error {
 		l.block.Terminator = &ir.Instruction{Kind: ir.InstrBr, BrTarget: mergeBB.Name}
 	}
 
-	// continue at merge
+	// продолжаем в merge-блоке
 	l.block = mergeBB
 	return nil
 }
@@ -972,13 +973,13 @@ func (l *lowerer) lowerIf(st *ast.IfStmt) error {
 // ForStmt = "for" ( [ SimpleStmt ] ";" [ Expr ] ";" [ SimpleStmt ] | Expr ) Block
 // SimpleStmt = AssignStmt | ExprStmt
 func (l *lowerer) lowerFor(st *ast.ForStmt) error {
-	// support: for cond { ... } and for init; cond; post { ... }
+	// Поддерживаем формы: for cond { ... } и for init; cond; post { ... }.
 	condBB := l.newBlock(l.newBlockName("for.cond"))
 	bodyBB := l.newBlock(l.newBlockName("for.body"))
 	postBB := l.newBlock(l.newBlockName("for.post"))
 	endBB := l.newBlock(l.newBlockName("for.end"))
 
-	// push loop targets
+	// кладем loop-таргеты в стек
 	l.breakTargets = append(l.breakTargets, endBB.Name)
 	if st.Post != nil {
 		l.continueTargets = append(l.continueTargets, postBB.Name)
@@ -986,7 +987,7 @@ func (l *lowerer) lowerFor(st *ast.ForStmt) error {
 		l.continueTargets = append(l.continueTargets, condBB.Name)
 	}
 
-	// init
+	// инициализация
 	if st.Init != nil {
 		if err := l.lowerStmt(st.Init); err != nil {
 			return err
@@ -995,7 +996,7 @@ func (l *lowerer) lowerFor(st *ast.ForStmt) error {
 
 	l.block.Terminator = &ir.Instruction{Kind: ir.InstrBr, BrTarget: condBB.Name}
 
-	// cond
+	// условие
 	l.block = condBB
 	var condVal *ir.Value
 	if st.Cond != nil {
@@ -1009,7 +1010,7 @@ func (l *lowerer) lowerFor(st *ast.ForStmt) error {
 	}
 	l.block.Terminator = &ir.Instruction{Kind: ir.InstrCondBr, CondCond: condVal, CondTrue: bodyBB.Name, CondFalse: endBB.Name}
 
-	// body
+	// тело
 	l.block = bodyBB
 	if err := l.lowerBlock(st.Body); err != nil {
 		return err
@@ -1032,9 +1033,9 @@ func (l *lowerer) lowerFor(st *ast.ForStmt) error {
 		}
 	}
 
-	// continue after loop
+	// продолжение после цикла
 	l.block = endBB
-	// pop loop targets
+	// снимаем loop-таргеты со стека
 	if len(l.breakTargets) > 0 {
 		l.breakTargets = l.breakTargets[:len(l.breakTargets)-1]
 	}
@@ -1060,7 +1061,7 @@ func (l *lowerer) lowerExpr(e ast.Expr) (*ir.Value, error) {
 			l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: loaded, LoadSrc: v, LoadAlign: alignOfIRType(elemTypeFromPtr(v.Type()))})
 			return loaded, nil
 		}
-		// fallback to global
+		// если локального нет, берем глобальную
 		obj := l.prog.TypesInfo.Uses[ex]
 		if obj == nil {
 			return nil, fmt.Errorf("unknown ident %s", ex.Name)
@@ -1126,7 +1127,7 @@ func (l *lowerer) lowerIndex(idx *ast.IndexExpr) (*ir.Value, error) {
 		valI8 := l.newTemp(ir.PtrI8)
 		l.block.Append(ir.Instruction{Kind: ir.InstrBitcast, Dest: keyI8, BitcastSrc: keyBuf, BitcastTarget: ir.PtrI8})
 		l.block.Append(ir.Instruction{Kind: ir.InstrBitcast, Dest: valI8, BitcastSrc: valBuf, BitcastTarget: ir.PtrI8})
-		// ignore ok result
+		// результат ok игнорируем
 		l.block.Append(ir.Instruction{Kind: ir.InstrCall, CallName: "gominic_map_get", CallArgs: []*ir.Value{mapVal, keyI8, valI8}, CallRet: ir.I1})
 		loaded := l.newTemp(valTy)
 		l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: loaded, LoadSrc: valBuf, LoadAlign: alignOfIRType(valTy)})
@@ -1168,7 +1169,7 @@ func (l *lowerer) lowerIndex(idx *ast.IndexExpr) (*ir.Value, error) {
 		pos := l.prog.Fset.Position(idx.Lbrack)
 		return nil, fmt.Errorf("unsupported index on pointer %s at %s", baseTy.String(), pos.String())
 	case ir.KindSlice:
-		// slice layout: { data *T, len i64, cap i64 }
+		// Представление среза: { data *T, len i64, cap i64 }.
 		slicePtr := l.valuePtr(base, baseTy)
 		dataPtr := l.newTemp(ir.PtrTo(baseTy.Elem))
 		l.block.Append(ir.Instruction{
@@ -1192,7 +1193,7 @@ func (l *lowerer) lowerIndex(idx *ast.IndexExpr) (*ir.Value, error) {
 		l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: loaded, LoadSrc: elemPtr, LoadAlign: alignOfIRType(baseTy.Elem)})
 		return loaded, nil
 	case ir.KindString:
-		// treat string as { i8*, i64 }
+		// рассматриваем строку как { i8*, i64 }
 		strPtr := l.valuePtr(base, baseTy)
 		dataPtr := l.newTemp(ir.PtrTo(ir.I8))
 		l.block.Append(ir.Instruction{
@@ -1231,21 +1232,21 @@ func (l *lowerer) lowerSliceExpr(slice *ast.SliceExpr) (*ir.Value, error) {
 		return nil, fmt.Errorf("slice expr: missing base type")
 	}
 
-	// Get expected result type from Go type system
+	// Берём ожидаемый тип результата из Go type system.
 	expectedTy, err := goTypeToIR(l.prog.TypesInfo.TypeOf(slice))
 	if err != nil {
-		// If we can't get the type, fall back to base type
+		// Если тип не удалось получить, используем базовый.
 		expectedTy = nil
 	}
 
-	// Get low index (default 0 if nil)
+	// Берём low-индекс (по умолчанию 0).
 	var lowVal *ir.Value
 	if slice.Low != nil {
 		lowVal, err = l.lowerExpr(slice.Low)
 		if err != nil {
 			return nil, err
 		}
-		// Ensure lowVal is i64
+		// Убеждаемся, что lowVal имеет тип i64.
 		if lowVal.Type() == nil || lowVal.Type().Basic != "i64" {
 			lowVal, err = l.lowerConvert(lowVal, ir.I64)
 			if err != nil {
@@ -1256,18 +1257,18 @@ func (l *lowerer) lowerSliceExpr(slice *ast.SliceExpr) (*ir.Value, error) {
 		lowVal = ir.NewConstant("0", ir.I64)
 	}
 
-	// Handle strings
+	// Обрабатываем строки.
 	if baseTy.Kind == ir.KindString {
 		ptr, lenVal := l.materializeStringParts(baseVal)
-		
-		// Get high index (default len if nil)
+
+		// Берём high-индекс (по умолчанию длина).
 		var highVal *ir.Value
 		if slice.High != nil {
 			highVal, err = l.lowerExpr(slice.High)
 			if err != nil {
 				return nil, err
 			}
-			// Ensure highVal is i64
+			// Убеждаемся, что highVal имеет тип i64.
 			if highVal.Type() == nil || highVal.Type().Basic != "i64" {
 				highVal, err = l.lowerConvert(highVal, ir.I64)
 				if err != nil {
@@ -1278,7 +1279,7 @@ func (l *lowerer) lowerSliceExpr(slice *ast.SliceExpr) (*ir.Value, error) {
 			highVal = lenVal
 		}
 
-		// Compute new ptr = ptr + low using GEP
+		// Вычисляем новый указатель: ptr + low через GEP.
 		newPtr := l.newTemp(ir.PtrTo(ir.I8))
 		l.block.Append(ir.Instruction{
 			Kind:          ir.InstrGEP,
@@ -1289,31 +1290,31 @@ func (l *lowerer) lowerSliceExpr(slice *ast.SliceExpr) (*ir.Value, error) {
 			GepResultType: ir.PtrTo(ir.I8),
 		})
 
-		// Compute new len = high - low
+		// Вычисляем новую длину: high - low.
 		newLen := l.newTemp(ir.I64)
 		l.block.Append(ir.Instruction{
-			Kind:     ir.InstrBinOp,
-			Dest:     newLen,
-			BinOp:    ir.Sub,
-			X:        highVal,
-			Y:        lowVal,
+			Kind:  ir.InstrBinOp,
+			Dest:  newLen,
+			BinOp: ir.Sub,
+			X:     highVal,
+			Y:     lowVal,
 		})
 
-		// Build new string or slice depending on expected type
+		// Собираем строку или срез в зависимости от ожидаемого типа.
 		if expectedTy != nil && expectedTy.Kind == ir.KindSlice && expectedTy.Elem == ir.I8 {
-			// Expected type is []byte, return slice
+			// Ожидается []byte, возвращаем срез.
 			return l.buildSliceValue(ir.I8, newPtr, newLen, newLen), nil
 		}
-		// Expected type is string, return string
+		// Ожидается string, возвращаем строку.
 		return l.buildStringValue(newPtr, newLen), nil
 	}
 
-	// Handle slices
+	// Обрабатываем срезы.
 	if baseTy.Kind == ir.KindSlice {
 		elemTy := baseTy.Elem
 		slicePtr := l.valuePtr(baseVal, baseTy)
-		
-		// Get data pointer
+
+		// читаем указатель на данные
 		dataPtrPtr := l.newTemp(ir.PtrTo(ir.PtrTo(elemTy)))
 		l.block.Append(ir.Instruction{
 			Kind:          ir.InstrGEP,
@@ -1326,7 +1327,7 @@ func (l *lowerer) lowerSliceExpr(slice *ast.SliceExpr) (*ir.Value, error) {
 		dataPtr := l.newTemp(ir.PtrTo(elemTy))
 		l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: dataPtr, LoadSrc: dataPtrPtr, LoadAlign: 8})
 
-		// Get len
+		// читаем длину
 		lenPtr := l.newTemp(ir.PtrTo(ir.I64))
 		l.block.Append(ir.Instruction{
 			Kind:          ir.InstrGEP,
@@ -1339,7 +1340,7 @@ func (l *lowerer) lowerSliceExpr(slice *ast.SliceExpr) (*ir.Value, error) {
 		lenVal := l.newTemp(ir.I64)
 		l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: lenVal, LoadSrc: lenPtr, LoadAlign: 8})
 
-		// Get cap
+		// читаем емкость
 		capPtr := l.newTemp(ir.PtrTo(ir.I64))
 		l.block.Append(ir.Instruction{
 			Kind:          ir.InstrGEP,
@@ -1352,14 +1353,14 @@ func (l *lowerer) lowerSliceExpr(slice *ast.SliceExpr) (*ir.Value, error) {
 		capVal := l.newTemp(ir.I64)
 		l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: capVal, LoadSrc: capPtr, LoadAlign: 8})
 
-		// Get high index (default len if nil)
+		// Берём high-индекс (по умолчанию длина).
 		var highVal *ir.Value
 		if slice.High != nil {
 			highVal, err = l.lowerExpr(slice.High)
 			if err != nil {
 				return nil, err
 			}
-			// Ensure highVal is i64
+			// Убеждаемся, что highVal имеет тип i64.
 			if highVal.Type() == nil || highVal.Type().Basic != "i64" {
 				highVal, err = l.lowerConvert(highVal, ir.I64)
 				if err != nil {
@@ -1370,7 +1371,7 @@ func (l *lowerer) lowerSliceExpr(slice *ast.SliceExpr) (*ir.Value, error) {
 			highVal = lenVal
 		}
 
-		// Compute new data = data + low using GEP
+		// Вычисляем новый data: data + low через GEP.
 		newDataPtr := l.newTemp(ir.PtrTo(elemTy))
 		l.block.Append(ir.Instruction{
 			Kind:          ir.InstrGEP,
@@ -1381,27 +1382,27 @@ func (l *lowerer) lowerSliceExpr(slice *ast.SliceExpr) (*ir.Value, error) {
 			GepResultType: ir.PtrTo(elemTy),
 		})
 
-		// Compute new len = high - low
+		// Вычисляем новую длину: high - low.
 		newLen := l.newTemp(ir.I64)
 		l.block.Append(ir.Instruction{
-			Kind:     ir.InstrBinOp,
-			Dest:     newLen,
-			BinOp:    ir.Sub,
-			X:        highVal,
-			Y:        lowVal,
+			Kind:  ir.InstrBinOp,
+			Dest:  newLen,
+			BinOp: ir.Sub,
+			X:     highVal,
+			Y:     lowVal,
 		})
 
-		// Compute new cap = cap - low
+		// Вычисляем новую ёмкость: cap - low.
 		newCap := l.newTemp(ir.I64)
 		l.block.Append(ir.Instruction{
-			Kind:     ir.InstrBinOp,
-			Dest:     newCap,
-			BinOp:    ir.Sub,
-			X:        capVal,
-			Y:        lowVal,
+			Kind:  ir.InstrBinOp,
+			Dest:  newCap,
+			BinOp: ir.Sub,
+			X:     capVal,
+			Y:     lowVal,
 		})
 
-		// Build new slice
+		// Собираем новый срез.
 		return l.buildSliceValue(elemTy, newDataPtr, newLen, newCap), nil
 	}
 
@@ -1412,7 +1413,7 @@ func (l *lowerer) buildStringValue(ptr *ir.Value, lenVal *ir.Value) *ir.Value {
 	strTy := ir.String()
 	addr := l.newTemp(ir.PtrTo(strTy))
 	l.block.Append(ir.Instruction{Kind: ir.InstrAlloca, Dest: addr, AllocaType: strTy, AllocaAlign: alignOfIRType(strTy)})
-	// ptr
+	// указатель
 	ptrField := l.newTemp(ir.PtrTo(ir.PtrTo(ir.I8)))
 	l.block.Append(ir.Instruction{
 		Kind:          ir.InstrGEP,
@@ -1423,7 +1424,7 @@ func (l *lowerer) buildStringValue(ptr *ir.Value, lenVal *ir.Value) *ir.Value {
 		GepResultType: ir.PtrTo(ir.PtrTo(ir.I8)),
 	})
 	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: ptr, StoreDst: ptrField, StoreAlign: 8})
-	// len
+	// длина
 	lenField := l.newTemp(ir.PtrTo(ir.I64))
 	l.block.Append(ir.Instruction{
 		Kind:          ir.InstrGEP,
@@ -1434,13 +1435,13 @@ func (l *lowerer) buildStringValue(ptr *ir.Value, lenVal *ir.Value) *ir.Value {
 		GepResultType: ir.PtrTo(ir.I64),
 	})
 	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: lenVal, StoreDst: lenField, StoreAlign: 8})
-	// load result
+	// загружаем результат
 	res := l.newTemp(strTy)
 	l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: res, LoadSrc: addr, LoadAlign: alignOfIRType(strTy)})
 	return res
 }
 
-// valuePtr: если значение не указатель, выделяет память и сохраняет значение
+// valuePtr: если значение не указатель, выделяем память и сохраняем его.
 // Нужно для операций, требующих указатель (например, передача в runtime функции)
 func (l *lowerer) valuePtr(v *ir.Value, ty *ir.TypeDesc) *ir.Value {
 	if v.Type() != nil && v.Type().Kind == ir.KindPointer {
@@ -1452,12 +1453,12 @@ func (l *lowerer) valuePtr(v *ir.Value, ty *ir.TypeDesc) *ir.Value {
 	return addr
 }
 
-// buildSliceValue: создаёт значение среза { i8*, i64, i64 } из данных, длины и ёмкости
+// buildSliceValue: собирает значение среза { i8*, i64, i64 }.
 func (l *lowerer) buildSliceValue(elemTy *ir.TypeDesc, dataPtr *ir.Value, lenVal *ir.Value, capVal *ir.Value) *ir.Value {
 	sliceTy := ir.Slice(elemTy)
 	addr := l.newTemp(ir.PtrTo(sliceTy))
 	l.block.Append(ir.Instruction{Kind: ir.InstrAlloca, Dest: addr, AllocaType: sliceTy, AllocaAlign: alignOfIRType(sliceTy)})
-	// data
+	// данные
 	dataField := l.newTemp(ir.PtrTo(ir.PtrTo(elemTy)))
 	l.block.Append(ir.Instruction{
 		Kind:          ir.InstrGEP,
@@ -1468,7 +1469,7 @@ func (l *lowerer) buildSliceValue(elemTy *ir.TypeDesc, dataPtr *ir.Value, lenVal
 		GepResultType: ir.PtrTo(ir.PtrTo(elemTy)),
 	})
 	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: dataPtr, StoreDst: dataField, StoreAlign: 8})
-	// len
+	// длина
 	lenField := l.newTemp(ir.PtrTo(ir.I64))
 	l.block.Append(ir.Instruction{
 		Kind:          ir.InstrGEP,
@@ -1479,7 +1480,7 @@ func (l *lowerer) buildSliceValue(elemTy *ir.TypeDesc, dataPtr *ir.Value, lenVal
 		GepResultType: ir.PtrTo(ir.I64),
 	})
 	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: lenVal, StoreDst: lenField, StoreAlign: 8})
-	// cap
+	// емкость
 	capField := l.newTemp(ir.PtrTo(ir.I64))
 	l.block.Append(ir.Instruction{
 		Kind:          ir.InstrGEP,
@@ -1490,7 +1491,7 @@ func (l *lowerer) buildSliceValue(elemTy *ir.TypeDesc, dataPtr *ir.Value, lenVal
 		GepResultType: ir.PtrTo(ir.I64),
 	})
 	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: capVal, StoreDst: capField, StoreAlign: 8})
-	// load result
+	// загружаем результат
 	res := l.newTemp(sliceTy)
 	l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: res, LoadSrc: addr, LoadAlign: alignOfIRType(sliceTy)})
 	return res
@@ -1563,11 +1564,11 @@ func (l *lowerer) lowerCompositeLit(cl *ast.CompositeLit) (*ir.Value, error) {
 		}
 		return l.buildSliceValue(elemTy, ptr, lenConst, lenConst), nil
 	case *types.Struct:
-		// Check if this is a recursive type that was replaced with PtrI8
-		// In that case, we can't process fields, so just create an uninitialized pointer
+		// Если рекурсивный тип заменён на PtrI8, поля читать нельзя.
+		// В этом случае возвращаем неинициализированный указатель.
 		if irTy.Kind == ir.KindPointer && irTy.Elem != nil && irTy.Elem.Basic == "i8" {
-			// This is a pointer type (likely PtrI8 from recursive type handling)
-			// Create an uninitialized pointer value
+			// Это указательный тип (обычно PtrI8 после обработки рекурсии).
+			// Создаём неинициализированное указательное значение.
 			ptr := l.newTemp(irTy)
 			l.block.Append(ir.Instruction{Kind: ir.InstrAlloca, Dest: ptr, AllocaType: ir.PtrI8, AllocaAlign: 8})
 			loaded := l.newTemp(irTy)
@@ -1629,11 +1630,11 @@ func (l *lowerer) lowerCompositeLit(cl *ast.CompositeLit) (*ir.Value, error) {
 
 // Selector = PrimaryExpr "." ident
 func (l *lowerer) lowerSelector(sel *ast.SelectorExpr) (*ir.Value, error) {
-	// First, check if this is a package constant access (e.g., ir.KindBasic)
-	// Check TypesInfo.Types first - this works for constants
+	// Сначала проверяем доступ к константе пакета (например, ir.KindBasic).
+	// Для констант в первую очередь смотрим TypesInfo.Types.
 	if tv, ok := l.prog.TypesInfo.Types[sel]; ok {
 		if tv.IsValue() && tv.Value != nil {
-			// This is a constant value
+			// Это константное значение.
 			ty, err := goTypeToIR(tv.Type)
 			if err != nil {
 				return nil, err
@@ -1641,44 +1642,44 @@ func (l *lowerer) lowerSelector(sel *ast.SelectorExpr) (*ir.Value, error) {
 			valStr := tv.Value.String()
 			return ir.NewConstant(valStr, ty), nil
 		}
-		// Also check if it's a type constant (for iota-based constants)
+		// Также проверяем вариант с типовой константой (iota).
 		if tv.IsType() {
-			// This might be a type, not a constant
+			// Здесь может быть тип, а не константа.
 		}
 	}
-	
-	// Check for struct field access FIRST, before checking Uses
-	// This prevents fields from being treated as global variables
+
+	// Сначала проверяем доступ к полю структуры, потом Uses.
+	// Иначе поле можно ошибочно принять за глобальную переменную.
 	selection := l.prog.TypesInfo.Selections[sel]
 	if selection != nil && selection.Kind() == types.FieldVal {
-		// This is a field access - handle it below
+		// Это доступ к полю, обрабатываем ниже.
 	} else {
-		// Not a field access - check if it's a constant or package variable
+		// Это не поле: проверяем константу или переменную пакета.
 		if obj, ok := l.prog.TypesInfo.Uses[sel.Sel]; ok {
 			if constVal, ok := obj.(*types.Const); ok {
-				// This is a constant
+				// Это константа.
 				ty, err := goTypeToIR(constVal.Type())
 				if err != nil {
 					return nil, err
 				}
-				// Convert constant value to string representation
+				// Преобразуем значение константы в строковый вид.
 				valStr := constVal.Val().String()
 				return ir.NewConstant(valStr, ty), nil
 			}
-			// Handle package variables (e.g., ir.Void, ir.I64)
+			// Обрабатываем переменные пакета (например, ir.Void, ir.I64).
 			if varVal, ok := obj.(*types.Var); ok {
-				// This is a package variable - treat as global
+				// Это переменная пакета, считаем её глобальной.
 				ty, err := goTypeToIR(varVal.Type())
 				if err != nil {
 					return nil, err
 				}
 				gname := varVal.Name()
-				// Check if this is from a package (via sel.X)
+				// Проверяем, что селектор действительно пакетный (через sel.X).
 				if pkgIdent, ok := sel.X.(*ast.Ident); ok {
 					if pkgObj, ok := l.prog.TypesInfo.Uses[pkgIdent]; ok {
 						if pkg, ok := pkgObj.(*types.PkgName); ok {
 							pkgName := pkg.Imported().Name()
-							// Use full qualified name for standard library variables
+							// Для переменных stdlib используем полное имя.
 							if pkgName != "" && (pkgName == "os" || pkgName == "fmt" || pkgName == "io") {
 								gname = pkgName + "." + gname
 							} else if l.prefix != "" {
@@ -1700,36 +1701,36 @@ func (l *lowerer) lowerSelector(sel *ast.SelectorExpr) (*ir.Value, error) {
 			}
 		}
 	}
-	
-	// Try to handle as package constant via package lookup
+
+	// Пробуем обработать как константу пакета через lookup.
 	if pkgIdent, ok := sel.X.(*ast.Ident); ok {
 		obj := l.prog.TypesInfo.Uses[pkgIdent]
 		if obj != nil {
 			if pkg, ok := obj.(*types.PkgName); ok {
-				// This is a package selector, look for the constant
+				// Это пакетный селектор, ищем константу в scope пакета.
 				pkgScope := pkg.Imported().Scope()
 				pkgObj := pkgScope.Lookup(sel.Sel.Name)
 				if pkgObj != nil {
 					if constVal, ok := pkgObj.(*types.Const); ok {
-						// Get the constant value
+						// Берем значение константы.
 						ty, err := goTypeToIR(constVal.Type())
 						if err != nil {
 							return nil, err
 						}
-						// Convert constant value to string representation
+						// Преобразуем значение константы в строковый вид.
 						valStr := constVal.Val().String()
 						return ir.NewConstant(valStr, ty), nil
 					}
 					if varVal, ok := pkgObj.(*types.Var); ok {
-						// This is a package variable - treat as global
+						// Это переменная пакета, считаем её глобальной.
 						ty, err := goTypeToIR(varVal.Type())
 						if err != nil {
 							return nil, err
 						}
-						// For standard library variables like os.Stderr, use package prefix
+						// Для stdlib-переменных (типа os.Stderr) добавляем префикс пакета.
 						pkgName := pkg.Imported().Name()
 						gname := varVal.Name()
-						// Use full qualified name for standard library variables
+						// Для stdlib используем полное имя.
 						if pkgName != "" && (pkgName == "os" || pkgName == "fmt" || pkgName == "io") {
 							gname = pkgName + "." + gname
 						} else if l.prefix != "" {
@@ -1744,10 +1745,10 @@ func (l *lowerer) lowerSelector(sel *ast.SelectorExpr) (*ir.Value, error) {
 			}
 		}
 	}
-	
-	// Now check for struct field access (if not already checked above)
+
+	// Если выше не сработало, проверяем доступ к полю struct.
 	if selection == nil {
-		// Try one more approach - check if sel.Sel is in Uses (sel.Sel is already *ast.Ident)
+		// Последняя попытка: ищем sel.Sel в Uses.
 		if obj, ok := l.prog.TypesInfo.Uses[sel.Sel]; ok {
 			if constVal, ok := obj.(*types.Const); ok {
 				ty, err := goTypeToIR(constVal.Type())
@@ -1772,46 +1773,46 @@ func (l *lowerer) lowerSelector(sel *ast.SelectorExpr) (*ir.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	
-	// Get IR type from Go type (this handles named types correctly)
+
+	// Получаем IR-тип из Go-типа (включая именованные типы).
 	baseGoType := l.prog.TypesInfo.TypeOf(sel.X)
 	if baseGoType == nil {
 		return nil, fmt.Errorf("no type info for selector base")
 	}
-	
-	// Get IR type for the base (may be pointer or value) - check this first for recursive types
+
+	// Получаем IR-тип базы (указатель или значение), сначала проверяем рекурсивные случаи.
 	baseType, err := goTypeToIR(baseGoType)
 	if err != nil {
 		return nil, err
 	}
-	
-	// Extract struct IR type from baseType
+
+	// Извлекаем IR-тип struct из baseType.
 	var structIRType *ir.TypeDesc
 	if baseType.Kind == ir.KindPointer {
 		structIRType = baseType.Elem
 	} else {
 		structIRType = baseType
 	}
-	
-	// Check if this is a recursive type BEFORE trying to get the Go struct type
+
+	// Сначала проверяем рекурсию, и только потом пытаемся взять Go-struct.
 	if structIRType.Kind != ir.KindStruct {
-		// This might be a recursive type - check the original named type first
-		// Get the element type from baseGoType (before calling Underlying())
+		// Возможно, это рекурсивный тип: сначала смотрим исходный именованный тип.
+		// Берем тип элемента из baseGoType до вызова Underlying().
 		var elemType types.Type
 		if ptrType, ok := baseGoType.(*types.Pointer); ok {
 			elemType = ptrType.Elem()
 		} else {
 			elemType = baseGoType
 		}
-		// Check if this is a known recursive type (like Global) that should be handled specially
+		// Проверяем известные рекурсивные типы (например, Global) со спец-обработкой.
 		if named, ok := elemType.(*types.Named); ok {
 			typeName := ""
 			if named.Obj() != nil {
 				typeName = named.Obj().Name()
 			}
 			fieldName := sel.Sel.Name
-			// Handle Global type fields (from ir package or main package when using -skip-check)
-			// Check if the type name matches regardless of package
+			// Поля Global обрабатываем отдельно (ir/main).
+			// Сверяемся по имени типа, независимо от пакета.
 			if typeName == "Global" {
 				if fieldName == "Align" {
 					return ir.NewConstant("0", ir.I64), nil
@@ -1826,67 +1827,66 @@ func (l *lowerer) lowerSelector(sel *ast.SelectorExpr) (*ir.Value, error) {
 				}
 			}
 		}
-		// If not a known recursive type, try to get the Go struct type
-		// Get the actual struct type (handle named types and pointers)
+		// Если это не известный рекурсивный тип, пробуем получить Go-struct.
+		// Получаем фактический struct-тип (с учетом именованных и указателей).
 		underlying := baseGoType.Underlying()
 		var structGoType types.Type
 		if ptrType, ok := underlying.(*types.Pointer); ok {
-			// It's a pointer - get the element type
+			// Это указатель: берем тип элемента.
 			structGoType = ptrType.Elem().Underlying()
 		} else {
-			// It's a value type - get underlying (handles named types)
+			// Это значение: берем underlying (для именованных тоже).
 			structGoType = underlying
 		}
-		
-		// Try to convert the Go struct type to IR
+
+		// Пробуем конвертировать Go-struct в IR.
 		structIRTypeFromGo, err := goTypeToIR(structGoType)
 		if err == nil && structIRTypeFromGo.Kind == ir.KindStruct {
-			// It's actually a struct in IR, use it
+			// В IR это действительно struct, используем его.
 			structIRType = structIRTypeFromGo
 		} else {
-			// It's a recursive type that was replaced with PtrI8 or similar
-			// Return a pointer value (can't access fields)
+			// Это рекурсивный тип, который заменили на PtrI8 или аналог.
+			// Возвращаем указатель, поля у него не читаем.
 			return ir.NewConstant("null", ir.PtrI8), nil
 		}
 	}
-	
-	// Now get the Go struct type for field index lookup
+
+	// Теперь получаем Go-struct для поиска индекса поля.
 	underlying := baseGoType.Underlying()
 	var structGoType types.Type
 	if ptrType, ok := underlying.(*types.Pointer); ok {
-		// It's a pointer - get the element type
+		// Это указатель: берем тип элемента.
 		structGoType = ptrType.Elem().Underlying()
 	} else {
-		// It's a value type - get underlying (handles named types)
+		// Это значение: берем underlying (для именованных тоже).
 		structGoType = underlying
 	}
-	
-	// Verify it's actually a struct (should be at this point)
+
+	// Проверяем, что это действительно struct.
 	_, ok := structGoType.(*types.Struct)
 	if !ok {
 		return nil, fmt.Errorf("selector base not struct (got %T)", structGoType)
 	}
-	
-	// Determine pointer to use
+
+	// Выбираем указатель, с которым будем работать.
 	var ptr *ir.Value
 	if baseVal.Type() != nil && baseVal.Type().Kind == ir.KindPointer {
-		// baseVal is already a pointer, use it directly
+		// baseVal уже указатель, используем как есть.
 		ptr = baseVal
 	} else if baseType.Kind == ir.KindPointer {
-		// Go type is pointer, but baseVal is value (shouldn't happen, but handle it)
+		// Go-тип — указатель, но baseVal значение (редко, но обрабатываем).
 		ptr = baseVal
 	} else {
-		// Value type - need to get address
+		// Для значения нужно получить адрес.
 		addr := l.newTemp(ir.PtrTo(structIRType))
 		l.block.Append(ir.Instruction{Kind: ir.InstrAlloca, Dest: addr, AllocaType: structIRType, AllocaAlign: alignOfIRType(structIRType)})
 		l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: baseVal, StoreDst: addr, StoreAlign: alignOfIRType(structIRType)})
 		ptr = addr
 	}
-	// structIRType should be a struct at this point (recursive types were handled earlier)
-	// But double-check to be safe
+	// Здесь ожидаем structIRType == struct, но проверим еще раз.
 	if structIRType.Kind != ir.KindStruct {
-		// This shouldn't happen, but if it does, handle it as a recursive type
-		// Get the element type from baseGoType
+		// Ситуация нештатная, но обрабатываем как рекурсивный тип.
+		// Берем тип элемента из baseGoType.
 		var elemType types.Type
 		if ptrType, ok := baseGoType.(*types.Pointer); ok {
 			elemType = ptrType.Elem()
@@ -1899,7 +1899,7 @@ func (l *lowerer) lowerSelector(sel *ast.SelectorExpr) (*ir.Value, error) {
 				typeName = named.Obj().Name()
 			}
 			fieldName := sel.Sel.Name
-			// Handle Global type fields
+			// Отдельная обработка полей Global.
 			if typeName == "Global" {
 				if fieldName == "Align" {
 					return ir.NewConstant("0", ir.I64), nil
@@ -1943,7 +1943,7 @@ func (l *lowerer) lowerBasicLit(lit *ast.BasicLit) (*ir.Value, error) {
 	case token.FLOAT:
 		return ir.NewConstant(lit.Value, ir.F64), nil
 	case token.STRING:
-		// strip quotes
+		// убираем кавычки
 		s, err := strconv.Unquote(lit.Value)
 		if err != nil {
 			return nil, err
@@ -1958,7 +1958,7 @@ func (l *lowerer) lowerBasicLit(lit *ast.BasicLit) (*ir.Value, error) {
 // BinOp = "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" | "&" | "|" | "<<" | ">>"
 func (l *lowerer) lowerBinary(b *ast.BinaryExpr) (*ir.Value, error) {
 	op := b.Op
-	// && и || требуют short-circuit evaluation (не вычисляем правую часть, если не нужно)
+	// && и || требуют короткого замыкания: правую часть считаем только при необходимости.
 	if op == token.LAND || op == token.LOR {
 		x, err := l.lowerExpr(b.X)
 		if err != nil {
@@ -2090,7 +2090,7 @@ func (l *lowerer) lowerBinary(b *ast.BinaryExpr) (*ir.Value, error) {
 		l.block.Append(ir.Instruction{Kind: ir.InstrICmp, Dest: dest, ICmpPred: pred, ICmpX: x, ICmpY: y})
 		return dest, nil
 	case token.SHL:
-		// Shift left
+		// сдвиг влево
 		destTy := x.Type()
 		if destTy == nil {
 			destTy = y.Type()
@@ -2099,18 +2099,18 @@ func (l *lowerer) lowerBinary(b *ast.BinaryExpr) (*ir.Value, error) {
 		l.block.Append(ir.Instruction{Kind: ir.InstrBinOp, Dest: dest, BinOp: ir.Shl, X: x, Y: y})
 		return dest, nil
 	case token.SHR:
-		// Shift right - use logical shift for unsigned, arithmetic for signed
+		// Сдвиг вправо: пока используем арифметический вариант.
 		destTy := x.Type()
 		if destTy == nil {
 			destTy = y.Type()
 		}
 		dest := l.newTemp(destTy)
-		// For simplicity, use arithmetic shift right (works for both signed and unsigned in most cases)
-		// In a full implementation, we'd check if the type is signed or unsigned
+		// Для простоты используем арифметический сдвиг вправо.
+		// В полной версии тут нужна проверка знаковости типа.
 		l.block.Append(ir.Instruction{Kind: ir.InstrBinOp, Dest: dest, BinOp: ir.AShr, X: x, Y: y})
 		return dest, nil
 	case token.AND:
-		// Bitwise AND (binary operator, not unary &)
+		// Побитовое AND (бинарный оператор, не unary &).
 		destTy := x.Type()
 		if destTy == nil {
 			destTy = y.Type()
@@ -2119,7 +2119,7 @@ func (l *lowerer) lowerBinary(b *ast.BinaryExpr) (*ir.Value, error) {
 		l.block.Append(ir.Instruction{Kind: ir.InstrBinOp, Dest: dest, BinOp: ir.And, X: x, Y: y})
 		return dest, nil
 	case token.OR:
-		// Bitwise OR (binary operator, not logical ||)
+		// Побитовое OR (бинарный оператор, не логический ||).
 		destTy := x.Type()
 		if destTy == nil {
 			destTy = y.Type()
@@ -2132,7 +2132,7 @@ func (l *lowerer) lowerBinary(b *ast.BinaryExpr) (*ir.Value, error) {
 	}
 }
 
-// lowerLogical: реализует short-circuit evaluation для && и ||
+// lowerLogical: реализует короткое замыкание для && и ||.
 // Создаёт условные переходы, чтобы не вычислять правую часть, если результат уже известен
 func (l *lowerer) lowerLogical(op token.Token, x *ir.Value, rhsExpr ast.Expr) (*ir.Value, error) {
 	resPtr := ir.NewRegister(l.newTempName()+".bool", ir.PtrTo(ir.I1))
@@ -2145,7 +2145,7 @@ func (l *lowerer) lowerLogical(op token.Token, x *ir.Value, rhsExpr ast.Expr) (*
 	if op == token.LAND {
 		// if x == false -> short with false, else evaluate y
 		l.block.Terminator = &ir.Instruction{Kind: ir.InstrCondBr, CondCond: x, CondTrue: rhsBB.Name, CondFalse: shortBB.Name}
-		// short path: store false
+		// короткая ветка: запись в память false
 		shortBB.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: ir.NewConstant("0", ir.I1), StoreDst: resPtr, StoreAlign: 1})
 		shortBB.Terminator = &ir.Instruction{Kind: ir.InstrBr, BrTarget: endBB.Name}
 	} else {
@@ -2166,14 +2166,14 @@ func (l *lowerer) lowerLogical(op token.Token, x *ir.Value, rhsExpr ast.Expr) (*
 		rhsBB.Terminator = &ir.Instruction{Kind: ir.InstrBr, BrTarget: endBB.Name}
 	}
 
-	// move to end block
+	// переход в конечный блок
 	l.block = endBB
 	result := l.newTemp(ir.I1)
 	endBB.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: result, LoadSrc: resPtr, LoadAlign: 1})
 	return result, nil
 }
 
-// UnaryExpr = ("+" | "-" | "!") Expr
+// UnaryExpr = ("&" | "-" | "!") Expr
 func (l *lowerer) lowerUnary(u *ast.UnaryExpr) (*ir.Value, error) {
 	switch u.Op {
 	case token.NOT:
@@ -2190,7 +2190,7 @@ func (l *lowerer) lowerUnary(u *ast.UnaryExpr) (*ir.Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		// assume int64
+		// предполагаем int64
 		dest := l.newTemp(v.Type())
 		l.block.Append(ir.Instruction{Kind: ir.InstrBinOp, Dest: dest, BinOp: ir.Sub, X: ir.NewConstant("0", v.Type()), Y: v})
 		return dest, nil
@@ -2201,7 +2201,7 @@ func (l *lowerer) lowerUnary(u *ast.UnaryExpr) (*ir.Value, error) {
 	}
 }
 
-// lowerStar handles *ast.StarExpr (pointer dereference)
+// lowerStar: обрабатывает *ast.StarExpr (разыменование указателя).
 func (l *lowerer) lowerStar(star *ast.StarExpr) (*ir.Value, error) {
 	ptrVal, err := l.lowerExpr(star.X)
 	if err != nil {
@@ -2290,7 +2290,7 @@ func (l *lowerer) lowerAddr(e ast.Expr) (*ir.Value, error) {
 			return nil, fmt.Errorf("address-of index on unsupported base")
 		}
 	case *ast.SelectorExpr:
-		// reuse selector lowering but keep pointer
+		// переиспользуем lowering селектора, но сохраняем указатель
 		baseVal, err := l.lowerExpr(ex.X)
 		if err != nil {
 			return nil, err
@@ -2313,10 +2313,10 @@ func (l *lowerer) lowerAddr(e ast.Expr) (*ir.Value, error) {
 		if sel == nil {
 			return nil, fmt.Errorf("no selection info")
 		}
-		// Check if structTy is actually a struct (not a pointer type from recursive type handling)
+		// Проверяем, что structTy действительно структура.
 		if structTy.Kind != ir.KindStruct {
-			// This is a recursive type that was replaced with PtrI8 or similar
-			// Return a pointer value (can't access fields)
+			// Это рекурсивный тип, заменённый на указатель.
+			// Возвращаем указатель: поля такого типа недоступны.
 			return ir.NewConstant("null", ir.PtrI8), nil
 		}
 		indices := sel.Index()
@@ -2339,7 +2339,7 @@ func (l *lowerer) lowerAddr(e ast.Expr) (*ir.Value, error) {
 		})
 		return fieldPtr, nil
 	case *ast.CompositeLit:
-		// Create a temporary variable for the composite literal
+		// Создаём временную переменную для composite literal.
 		gt := l.prog.TypesInfo.TypeOf(ex)
 		if gt == nil {
 			return nil, fmt.Errorf("no type for composite literal")
@@ -2348,20 +2348,20 @@ func (l *lowerer) lowerAddr(e ast.Expr) (*ir.Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Allocate space for the composite literal
+		// Выделяем память под composite literal.
 		addr := l.newTemp(ir.PtrTo(irTy))
 		l.block.Append(ir.Instruction{Kind: ir.InstrAlloca, Dest: addr, AllocaType: irTy, AllocaAlign: alignOfIRType(irTy)})
-		
-		// Lower the composite literal to get its value
+
+		// Понижаем composite literal и получаем его значение.
 		val, err := l.lowerCompositeLit(ex)
 		if err != nil {
 			return nil, err
 		}
-		
-		// Store the value into the allocated space
+
+		// Сохраняем значение в выделенную память.
 		l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: val, StoreDst: addr, StoreAlign: alignOfIRType(irTy)})
-		
-		// Return the address
+
+		// возвращаем адрес
 		return addr, nil
 	default:
 		return nil, fmt.Errorf("address-of unsupported expr %T", e)
@@ -2371,7 +2371,7 @@ func (l *lowerer) lowerAddr(e ast.Expr) (*ir.Value, error) {
 // Call = PrimaryExpr "(" [ ExprList ] ")"
 // ExprList = Expr { "," Expr }
 func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
-	// Handle type conversion where Fun is a type expression (e.g., []byte(s)).
+	// Обрабатываем конверсию, когда Fun — выражение типа (например, []byte(s)).
 	if len(c.Args) == 1 {
 		dstType := l.prog.TypesInfo.TypeOf(c.Fun)
 		if dstType == nil {
@@ -2385,7 +2385,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 					if err != nil {
 						return nil, err
 					}
-					// Special-case string -> []byte
+					// Отдельный путь для string -> []byte.
 					// Конвертация string -> []byte: создаём срез и копируем данные через memcpy
 					if dstTy.Kind == ir.KindSlice && dstTy.Elem == ir.I8 && srcVal.Type() != nil && srcVal.Type().Kind == ir.KindString {
 						ptr, ln := l.materializeStringParts(srcVal)
@@ -2407,11 +2407,11 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 		}
 	}
 
-	// Handle function calls through package selector (e.g., ir.ValueName(v))
+	// Обрабатываем вызовы через селектор пакета (например, ir.ValueName(v)).
 	if selExpr, ok := c.Fun.(*ast.SelectorExpr); ok {
-		// Check if this is a package function call
+		// Проверяем, что это вызов функции пакета.
 		if pkgIdent, ok := selExpr.X.(*ast.Ident); ok {
-			// Get the function object
+			// Получаем объект функции.
 			if obj, ok := l.prog.TypesInfo.Uses[selExpr.Sel]; ok {
 				if fn, ok := obj.(*types.Func); ok {
 					sig := fn.Type().(*types.Signature)
@@ -2435,7 +2435,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 						for i := 0; i < len(args); i = i + 1 {
 							allArgs[i+1] = args[i]
 						}
-						// Determine return type
+						// Определяем тип возвращаемого значения.
 						var retTy *ir.TypeDesc
 						if sig.Results().Len() == 1 {
 							rt, err := goTypeToIR(sig.Results().At(0).Type())
@@ -2470,8 +2470,8 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 						l.block.Append(ir.Instruction{Kind: ir.InstrCall, Dest: dest, CallName: fnName, CallArgs: allArgs, CallRet: retTy})
 						return dest, nil
 					}
-					// This is a function call, not a method
-					// Lower arguments
+					// Это вызов функции, не метода.
+					// Понижаем аргументы.
 					args := make([]*ir.Value, len(c.Args))
 					for i := 0; i < len(c.Args); i = i + 1 {
 						v, err := l.lowerExpr(c.Args[i])
@@ -2480,7 +2480,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 						}
 						args[i] = v
 					}
-					// Determine return type
+					// Определяем тип возвращаемого значения.
 					var retTy *ir.TypeDesc
 					if sig.Results().Len() == 1 {
 						rt, err := goTypeToIR(sig.Results().At(0).Type())
@@ -2489,7 +2489,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 						}
 						retTy = rt
 					}
-					// Build function name: pkg.FuncName
+					// Формируем имя функции: pkg.FuncName.
 					fnName := pkgIdent.Name + "." + selExpr.Sel.Name
 					var dest *ir.Value
 					if retTy != nil && retTy != ir.Void {
@@ -2500,8 +2500,8 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 				}
 			}
 		}
-		// Handle method calls on expressions (e.g., entry.Append(...), p.TypesPkg.Name())
-		// Try to get method info from Selections or Uses
+		// Обрабатываем вызовы методов на выражениях (например, entry.Append(...)).
+		// Информацию о методе берем из Selections или Uses.
 		sel := l.prog.TypesInfo.Selections[selExpr]
 		var method *types.Func
 		var isMethod bool
@@ -2512,7 +2512,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 					isMethod = true
 				}
 			} else if sel.Kind() == types.FieldVal {
-				// This might be a field that is a function
+				// Это может быть поле-функция.
 				if obj, ok := l.prog.TypesInfo.Uses[selExpr.Sel]; ok {
 					if fn, ok := obj.(*types.Func); ok {
 						method = fn
@@ -2522,7 +2522,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 			}
 		}
 		if !isMethod {
-			// Try Uses as fallback
+			// Запасной путь: смотрим Uses.
 			if obj, ok := l.prog.TypesInfo.Uses[selExpr.Sel]; ok {
 				if fn, ok := obj.(*types.Func); ok {
 					sig := fn.Type().(*types.Signature)
@@ -2537,9 +2537,9 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 			}
 		}
 		if method != nil {
-			// Get method signature
+			// Получаем сигнатуру метода.
 			sig := method.Type().(*types.Signature)
-			// Lower arguments
+			// Понижаем аргументы.
 			args := make([]*ir.Value, len(c.Args))
 			for i := 0; i < len(c.Args); i = i + 1 {
 				v, err := l.lowerExpr(c.Args[i])
@@ -2548,7 +2548,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 				}
 				args[i] = v
 			}
-			// Determine return type
+			// Определяем тип возвращаемого значения.
 			var retTy *ir.TypeDesc
 			if sig.Results().Len() == 1 {
 				rt, err := goTypeToIR(sig.Results().At(0).Type())
@@ -2560,7 +2560,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 			var fnName string
 			var allArgs []*ir.Value
 			if isMethod {
-				// This is a method call - prepend receiver
+				// Это вызов метода: receiver добавляем первым аргументом.
 				recvVal, err := l.lowerExpr(selExpr.X)
 				if err != nil {
 					return nil, err
@@ -2570,7 +2570,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 				for i := 0; i < len(args); i = i + 1 {
 					allArgs[i+1] = args[i]
 				}
-				// Build function name: pkg.TypeName.MethodName
+				// Формируем имя: pkg.TypeName.MethodName.
 				recvType := sig.Recv().Type()
 				typeName := ""
 				if named, ok := recvType.(*types.Named); ok {
@@ -2590,9 +2590,9 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 				}
 				fnName = typeName + "." + selExpr.Sel.Name
 			} else {
-				// This is a function field call - no receiver
+				// Это вызов поля-функции, receiver не нужен.
 				allArgs = args
-				// Get the type of the base expression to determine package
+				// По типу базового выражения определяем пакет.
 				baseType := l.prog.TypesInfo.TypeOf(selExpr.X)
 				pkgName := ""
 				if named, ok := baseType.(*types.Named); ok {
@@ -2619,12 +2619,12 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 			l.block.Append(ir.Instruction{Kind: ir.InstrCall, Dest: dest, CallName: fnName, CallArgs: allArgs, CallRet: retTy})
 			return dest, nil
 		}
-		// Last resort: try to get type info and build function name from selector
+		// Последняя попытка: взять тип селектора и собрать имя функции.
 		baseType := l.prog.TypesInfo.TypeOf(selExpr.X)
 		selType := l.prog.TypesInfo.TypeOf(selExpr)
 		if selType != nil {
 			if sig, ok := selType.(*types.Signature); ok {
-				// Lower arguments
+				// Понижаем аргументы.
 				args := make([]*ir.Value, len(c.Args))
 				for i := 0; i < len(c.Args); i = i + 1 {
 					v, err := l.lowerExpr(c.Args[i])
@@ -2633,7 +2633,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 					}
 					args[i] = v
 				}
-				// Determine return type
+				// Определяем тип возвращаемого значения.
 				var retTy *ir.TypeDesc
 				if sig.Results().Len() == 1 {
 					rt, err := goTypeToIR(sig.Results().At(0).Type())
@@ -2642,7 +2642,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 					}
 					retTy = rt
 				}
-				// Try to build function name from base type and selector
+				// Пытаемся собрать имя функции из базового типа и селектора.
 				fnName := selExpr.Sel.Name
 				if baseType != nil {
 					if named, ok := baseType.(*types.Named); ok {
@@ -2672,7 +2672,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 	if !ok {
 		return nil, fmt.Errorf("unsupported call target %T", c.Fun)
 	}
-	// type conversion: Fun is a type name.
+	// Конверсия типа: Fun является именем типа.
 	if obj, ok := l.prog.TypesInfo.Uses[fnIdent]; ok {
 		if _, isType := obj.(*types.TypeName); isType {
 			if len(c.Args) != 1 {
@@ -2689,8 +2689,8 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 			return l.lowerConvert(val, dstTy)
 		}
 	}
-	// builtins: len/make/append
-	// append поддерживается только с 2 аргументами: append(slice, elem)
+	// Встроенные функции: len/make/append.
+	// Поддерживается только форма append(slice, elem).
 	if fnIdent.Name == "len" {
 		return l.lowerBuiltinLen(c.Args)
 	}
@@ -2700,7 +2700,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 	if fnIdent.Name == "append" {
 		return l.lowerBuiltinAppend(c.Args)
 	}
-	// builtin print wrappers not handled; assume normal call returning at most 1 value.
+	// Обёртки print отдельно не разбираем: считаем обычным вызовом.
 	args := make([]*ir.Value, len(c.Args))
 	for i := 0; i < len(c.Args); i++ {
 		v, err := l.lowerExpr(c.Args[i])
@@ -2709,7 +2709,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 		}
 		args[i] = v
 	}
-	// determine return type
+	// Определяем тип возвращаемого значения.
 	var retTy *ir.TypeDesc
 	if obj := l.prog.TypesInfo.Uses[fnIdent]; obj != nil {
 		if sig, ok := obj.Type().(*types.Signature); ok {
@@ -2720,7 +2720,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 				}
 				retTy = rt
 			}
-			// methods with receiver unsupported in subset
+			// Методы с receiver в этом пути не поддерживаем.
 			if sig.Recv() != nil {
 				return nil, fmt.Errorf("unsupported: methods with receiver")
 			}
@@ -2730,28 +2730,27 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 	if retTy != nil && retTy != ir.Void {
 		dest = l.newTemp(retTy)
 	}
-	// Build function name with package prefix
+	// Собираем имя функции с префиксом пакета.
 	fnName := fnIdent.Name
-	// First, try to use l.prefix (set in buildInto for non-main packages)
-	// This matches the logic in lowerFunc, which adds prefix for all functions if l.prefix is set
+	// Сначала пробуем l.prefix (он задаётся в buildInto для non-main).
+	// Это совпадает с логикой lowerFunc.
 	if l.prefix != "" {
 		fnName = l.prefix + fnName
 	} else {
-		// If prefix is not set, add package prefix for exported functions only
-		// (to match function definitions which only have prefix for exported functions when prefix is not set)
+		// Если prefix пуст, добавляем префикс только для экспортируемых функций.
 		if len(fnName) > 0 && fnName[0] >= 'A' && fnName[0] <= 'Z' {
 			pkgName := ""
 			if l.prog != nil && l.prog.PkgName != "" {
 				pkgName = l.prog.PkgName
 			}
-			// If program's package name is "main" or empty, try to get from function object
-			// (but only if it's not "main", as type checker may use "main" for all packages with -skip-check)
-			if (pkgName == "" || pkgName == "main") {
+			// Если имя пакета пустое или main, пробуем взять его из объекта функции.
+			// main здесь не используем: type checker иногда подставляет его всем пакетам.
+			if pkgName == "" || pkgName == "main" {
 				if obj := l.prog.TypesInfo.Uses[fnIdent]; obj != nil {
 					if fn, ok := obj.(*types.Func); ok {
 						if fn.Pkg() != nil {
 							fnPkgName := fn.Pkg().Name()
-							// Only use fn.Pkg() if it's not "main" (type checker may use "main" for all packages)
+							// Используем fn.Pkg() только если это не main.
 							if fnPkgName != "" && fnPkgName != "main" {
 								pkgName = fnPkgName
 							}
@@ -2759,7 +2758,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 					}
 				}
 			}
-			// Add prefix if package name is set (including "main" and "gominic" to match function definitions)
+			// Добавляем префикс, если имя пакета определено.
 			if pkgName != "" {
 				fnName = pkgName + "." + fnName
 			}
@@ -2769,7 +2768,7 @@ func (l *lowerer) lowerCall(c *ast.CallExpr) (*ir.Value, error) {
 	return dest, nil
 }
 
-// lowerConvert: конвертация типов (int->int64, int->float64, и т.д.)
+// lowerConvert: конвертация типов (int->int64, int->float64 и т.д.).
 // Использует инструкции SIToFP, FPToSI, PtrToInt, IntToPtr
 func (l *lowerer) lowerConvert(v *ir.Value, dst *ir.TypeDesc) (*ir.Value, error) {
 	if v.Type() == nil || dst == nil {
@@ -2780,7 +2779,7 @@ func (l *lowerer) lowerConvert(v *ir.Value, dst *ir.TypeDesc) (*ir.Value, error)
 		return v, nil
 	}
 	out := l.newTemp(dst)
-	// int64 <-> double conversions
+	// Конверсии между int64 и double.
 	if v.Type().Basic == "double" && dst.Basic == "i64" {
 		l.block.Append(ir.Instruction{Kind: ir.InstrConv, Dest: out, ConvOp: ir.FPToSI, ConvSrc: v, ConvTo: dst})
 		return out, nil
@@ -2789,24 +2788,24 @@ func (l *lowerer) lowerConvert(v *ir.Value, dst *ir.TypeDesc) (*ir.Value, error)
 		l.block.Append(ir.Instruction{Kind: ir.InstrConv, Dest: out, ConvOp: ir.SIToFP, ConvSrc: v, ConvTo: dst})
 		return out, nil
 	}
-	// int32 -> int64 promote
+	// Расширение int32 -> int64.
 	if v.Type().Basic == "i32" && dst.Basic == "i64" {
 		l.block.Append(ir.Instruction{Kind: ir.InstrConv, Dest: out, ConvOp: ir.SExt, ConvSrc: v, ConvTo: dst})
 		return out, nil
 	}
-	// pointer-to-pointer bitcast (used rarely)
+	// Bitcast указатель->указатель (редкий случай).
 	if v.Type().Kind == ir.KindPointer && dst.Kind == ir.KindPointer {
 		l.block.Append(ir.Instruction{Kind: ir.InstrBitcast, Dest: out, BitcastSrc: v, BitcastTarget: dst})
 		return out, nil
 	}
-	// i8* -> string conversion (pointer to bytes to string)
+	// Конверсия i8* -> string.
 	if v.Type().Kind == ir.KindPointer && v.Type().Elem != nil && v.Type().Elem == ir.I8 && dst.Kind == ir.KindString {
-		// Create a string struct: { i8* ptr, i64 len }
-		// We need to allocate space for the string struct
+		// Создаем string-структуру: { i8* ptr, i64 len }.
+		// Выделяем под нее память.
 		strPtr := l.newTemp(ir.PtrTo(dst))
 		l.block.Append(ir.Instruction{Kind: ir.InstrAlloca, Dest: strPtr, AllocaType: dst, AllocaAlign: 8})
-		
-		// Store the pointer (first field)
+
+		// Записываем указатель (первое поле).
 		ptrFieldPtr := l.newTemp(ir.PtrTo(ir.PtrTo(ir.I8)))
 		l.block.Append(ir.Instruction{
 			Kind:          ir.InstrGEP,
@@ -2817,8 +2816,8 @@ func (l *lowerer) lowerConvert(v *ir.Value, dst *ir.TypeDesc) (*ir.Value, error)
 			GepResultType: ir.PtrTo(ir.PtrTo(ir.I8)),
 		})
 		l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: v, StoreDst: ptrFieldPtr, StoreAlign: 8})
-		
-		// Store zero length (second field) - we don't know the length from just a pointer
+
+		// Длину ставим 0 (второе поле), потому что по одному указателю длина неизвестна.
 		lenFieldPtr := l.newTemp(ir.PtrTo(ir.I64))
 		l.block.Append(ir.Instruction{
 			Kind:          ir.InstrGEP,
@@ -2830,17 +2829,17 @@ func (l *lowerer) lowerConvert(v *ir.Value, dst *ir.TypeDesc) (*ir.Value, error)
 		})
 		zeroLen := ir.NewConstant("0", ir.I64)
 		l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: zeroLen, StoreDst: lenFieldPtr, StoreAlign: 8})
-		
-		// Load the complete string struct
+
+		// Загружаем готовую строковую структуру.
 		loaded := l.newTemp(dst)
 		l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: loaded, LoadSrc: strPtr, LoadAlign: 8})
 		return loaded, nil
 	}
-	// []byte -> string conversion (slice to string)
+	// Конверсия []byte -> string.
 	if v.Type().Kind == ir.KindSlice && v.Type().Elem != nil && v.Type().Elem == ir.I8 && dst.Kind == ir.KindString {
-		// Extract data pointer and length from slice
+		// Извлекаем указатель на данные и длину из среза.
 		slicePtr := l.valuePtr(v, v.Type())
-		// Get data pointer
+		// Читаем указатель на данные.
 		dataPtrPtr := l.newTemp(ir.PtrTo(ir.PtrTo(ir.I8)))
 		l.block.Append(ir.Instruction{
 			Kind:          ir.InstrGEP,
@@ -2852,7 +2851,7 @@ func (l *lowerer) lowerConvert(v *ir.Value, dst *ir.TypeDesc) (*ir.Value, error)
 		})
 		ptr := l.newTemp(ir.PtrTo(ir.I8))
 		l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: ptr, LoadSrc: dataPtrPtr, LoadAlign: 8})
-		// Get length
+		// Читаем длину.
 		lenPtr := l.newTemp(ir.PtrTo(ir.I64))
 		l.block.Append(ir.Instruction{
 			Kind:          ir.InstrGEP,
@@ -2864,13 +2863,13 @@ func (l *lowerer) lowerConvert(v *ir.Value, dst *ir.TypeDesc) (*ir.Value, error)
 		})
 		lenVal := l.newTemp(ir.I64)
 		l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: lenVal, LoadSrc: lenPtr, LoadAlign: 8})
-		// Build string from ptr and len
+		// Собираем string из указателя и длины.
 		return l.buildStringValue(ptr, lenVal), nil
 	}
 	return nil, fmt.Errorf("conversion from %s to %s not supported", v.Type().String(), dst.String())
 }
 
-// ensureFloat64: приводит значение к float64, если оно целое (нужно для float операций)
+// ensureFloat64: приводит значение к float64 для float-операций.
 func (l *lowerer) ensureFloat64(v *ir.Value) *ir.Value {
 	if v.Type() != nil && v.Type().Basic == "double" {
 		return v
@@ -2935,7 +2934,7 @@ func (l *lowerer) lowerBuiltinMake(args []ast.Expr) (*ir.Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	// map: handle first
+	// Сначала обрабатываем map.
 	if mapType, ok := l.prog.TypesInfo.TypeOf(args[0]).Underlying().(*types.Map); ok {
 		keyTy, err := goTypeToIR(mapType.Key())
 		if err != nil {
@@ -2989,7 +2988,7 @@ func (l *lowerer) lowerBuiltinMake(args []ast.Expr) (*ir.Value, error) {
 	return nil, fmt.Errorf("make unsupported type")
 }
 
-// append поддерживается только с 2 аргументами: append(slice, elem)
+// Поддерживается только форма append(slice, elem).
 func (l *lowerer) lowerBuiltinAppend(args []ast.Expr) (*ir.Value, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("append: want 2 args")
@@ -3005,107 +3004,160 @@ func (l *lowerer) lowerBuiltinAppend(args []ast.Expr) (*ir.Value, error) {
 	if sliceVal.Type() == nil || sliceVal.Type().Kind != ir.KindSlice {
 		return nil, fmt.Errorf("append: first arg not slice")
 	}
-	slicePtr := l.valuePtr(sliceVal, sliceVal.Type())
-	elemSize := ir.NewConstant(strconv.Itoa(int(sizeOfIRType(sliceVal.Type().Elem))), ir.I64)
-	// call runtime append equivalent? Пока примитив: len+1 cap+? reallocate via makeSlice
-	// len
+	sliceTy := sliceVal.Type()
+	elemTy := sliceTy.Elem
+	slicePtr := l.valuePtr(sliceVal, sliceTy)
+	elemSize := ir.NewConstant(strconv.FormatInt(sizeOfIRType(elemTy), 10), ir.I64)
+
+	// Читаем data/len/cap из среза.
+	dataPtrPtr := l.newTemp(ir.PtrTo(ir.PtrTo(elemTy)))
+	l.block.Append(ir.Instruction{
+		Kind:          ir.InstrGEP,
+		Dest:          dataPtrPtr,
+		GepSrc:        slicePtr,
+		GepPointee:    sliceTy,
+		GepIndices:    []*ir.Value{ir.NewConstant("0", ir.I32), ir.NewConstant("0", ir.I32)},
+		GepResultType: ir.PtrTo(ir.PtrTo(elemTy)),
+	})
+	dataPtr := l.newTemp(ir.PtrTo(elemTy))
+	l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: dataPtr, LoadSrc: dataPtrPtr, LoadAlign: 8})
+
 	lenPtr := l.newTemp(ir.PtrTo(ir.I64))
 	lenVal := l.newTemp(ir.I64)
 	l.block.Append(ir.Instruction{
 		Kind:          ir.InstrGEP,
 		Dest:          lenPtr,
 		GepSrc:        slicePtr,
-		GepPointee:    sliceVal.Type(),
+		GepPointee:    sliceTy,
 		GepIndices:    []*ir.Value{ir.NewConstant("0", ir.I32), ir.NewConstant("1", ir.I32)},
 		GepResultType: ir.PtrTo(ir.I64),
 	})
 	l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: lenVal, LoadSrc: lenPtr, LoadAlign: 8})
+
 	newLen := l.newTemp(ir.I64)
 	l.block.Append(ir.Instruction{Kind: ir.InstrBinOp, Dest: newLen, BinOp: ir.Add, X: lenVal, Y: ir.NewConstant("1", ir.I64)})
-	// cap
+
 	capPtr := l.newTemp(ir.PtrTo(ir.I64))
 	capVal := l.newTemp(ir.I64)
 	l.block.Append(ir.Instruction{
 		Kind:          ir.InstrGEP,
 		Dest:          capPtr,
 		GepSrc:        slicePtr,
-		GepPointee:    sliceVal.Type(),
+		GepPointee:    sliceTy,
 		GepIndices:    []*ir.Value{ir.NewConstant("0", ir.I32), ir.NewConstant("2", ir.I32)},
 		GepResultType: ir.PtrTo(ir.I64),
 	})
 	l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: capVal, LoadSrc: capPtr, LoadAlign: 8})
-	// For simplicity always allocate new slice with cap = newLen
-	ptr := l.newTemp(ir.PtrTo(sliceVal.Type().Elem))
+
+	// Решаем, нужно ли расширение: newLen > cap.
+	needGrow := l.newTemp(ir.I1)
+	l.block.Append(ir.Instruction{Kind: ir.InstrICmp, Dest: needGrow, ICmpPred: ir.ICmpSgt, ICmpX: newLen, ICmpY: capVal})
+
+	// Через стек храним итоговые data/cap, чтобы обойтись без phi.
+	outDataAddr := l.newTemp(ir.PtrTo(ir.PtrTo(elemTy)))
+	outCapAddr := l.newTemp(ir.PtrTo(ir.I64))
+	l.block.Append(ir.Instruction{Kind: ir.InstrAlloca, Dest: outDataAddr, AllocaType: ir.PtrTo(elemTy), AllocaAlign: 8})
+	l.block.Append(ir.Instruction{Kind: ir.InstrAlloca, Dest: outCapAddr, AllocaType: ir.I64, AllocaAlign: 8})
+
+	growBB := l.newBlock(l.newBlockName("append.grow"))
+	noGrowBB := l.newBlock(l.newBlockName("append.nogrow"))
+	contBB := l.newBlock(l.newBlockName("append.cont"))
+	l.block.Terminator = &ir.Instruction{Kind: ir.InstrCondBr, CondCond: needGrow, CondTrue: growBB.Name, CondFalse: noGrowBB.Name}
+	l.block = growBB
+
+	// Ветка роста: выделяем новый буфер, копируем старые элементы.
+	newDataPtr := l.newTemp(ir.PtrTo(elemTy))
 	l.block.Append(ir.Instruction{
 		Kind:     ir.InstrCall,
-		Dest:     ptr,
+		Dest:     newDataPtr,
 		CallName: "gominic_makeSlice",
 		CallArgs: []*ir.Value{newLen, newLen, elemSize},
-		CallRet:  ir.PtrTo(sliceVal.Type().Elem),
+		CallRet:  ir.PtrTo(elemTy),
 	})
-	// TODO: copy old data + append elem. For now just write elem at index 0 if len was 0.
-	elemPtr := l.newTemp(ir.PtrTo(sliceVal.Type().Elem))
+	oldBytes := l.newTemp(ir.I64)
+	l.block.Append(ir.Instruction{Kind: ir.InstrBinOp, Dest: oldBytes, BinOp: ir.Mul, X: lenVal, Y: elemSize})
+	newDataI8 := l.newTemp(ir.PtrI8)
+	oldDataI8 := l.newTemp(ir.PtrI8)
+	l.block.Append(ir.Instruction{Kind: ir.InstrBitcast, Dest: newDataI8, BitcastSrc: newDataPtr, BitcastTarget: ir.PtrI8})
+	l.block.Append(ir.Instruction{Kind: ir.InstrBitcast, Dest: oldDataI8, BitcastSrc: dataPtr, BitcastTarget: ir.PtrI8})
+	l.block.Append(ir.Instruction{Kind: ir.InstrCallVoid, CallName: "gominic_memcpy", CallArgs: []*ir.Value{newDataI8, oldDataI8, oldBytes}})
+	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: newDataPtr, StoreDst: outDataAddr, StoreAlign: 8})
+	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: newLen, StoreDst: outCapAddr, StoreAlign: 8})
+	l.block.Terminator = &ir.Instruction{Kind: ir.InstrBr, BrTarget: contBB.Name}
+
+	// Без роста: пишем в текущий буфер.
+	l.block = noGrowBB
+	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: dataPtr, StoreDst: outDataAddr, StoreAlign: 8})
+	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: capVal, StoreDst: outCapAddr, StoreAlign: 8})
+	l.block.Terminator = &ir.Instruction{Kind: ir.InstrBr, BrTarget: contBB.Name}
+
+	// Общая часть: записываем элемент в индекс len и собираем новый slice.
+	l.block = contBB
+	finalDataPtr := l.newTemp(ir.PtrTo(elemTy))
+	finalCap := l.newTemp(ir.I64)
+	l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: finalDataPtr, LoadSrc: outDataAddr, LoadAlign: 8})
+	l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: finalCap, LoadSrc: outCapAddr, LoadAlign: 8})
+
+	elemPtr := l.newTemp(ir.PtrTo(elemTy))
 	l.block.Append(ir.Instruction{
 		Kind:          ir.InstrGEP,
 		Dest:          elemPtr,
-		GepSrc:        ptr,
-		GepPointee:    sliceVal.Type().Elem,
-		GepIndices:    []*ir.Value{ir.NewConstant("0", ir.I64)},
-		GepResultType: ir.PtrTo(sliceVal.Type().Elem),
+		GepSrc:        finalDataPtr,
+		GepPointee:    elemTy,
+		GepIndices:    []*ir.Value{lenVal},
+		GepResultType: ir.PtrTo(elemTy),
 	})
-	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: elemVal, StoreDst: elemPtr, StoreAlign: alignOfIRType(sliceVal.Type().Elem)})
-	return l.buildSliceValue(sliceVal.Type().Elem, ptr, newLen, newLen), nil
-}
+	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: elemVal, StoreDst: elemPtr, StoreAlign: alignOfIRType(elemTy)})
 
+	return l.buildSliceValue(elemTy, finalDataPtr, newLen, finalCap), nil
+}
 
 func goTypeToIR(t types.Type) (*ir.TypeDesc, error) {
 	return goTypeToIRVisited(t, make(map[string]bool))
 }
 
 func goTypeToIRVisited(t types.Type, visited map[string]bool) (*ir.TypeDesc, error) {
-	// Handle nil type
+	// Обрабатываем nil-тип.
 	if t == nil {
 		return ir.Void, nil
 	}
-	// Handle named types first to detect recursion before calling Underlying()
+	// Сначала обрабатываем именованные типы, чтобы поймать рекурсию до Underlying().
 	if named, ok := t.(*types.Named); ok {
 		if named.Obj() != nil {
 			typeName := named.Obj().Name()
-			// Handle builtin error type specially
+			// Отдельно обрабатываем встроенный error.
 			if typeName == "error" {
-				// error is an interface type - represent as pointer
+				// error в IR представляем как указатель.
 				return ir.PtrI8, nil
 			}
 			if named.Obj().Pkg() != nil {
 				pkgName := named.Obj().Pkg().Name()
 				pkgPath := named.Obj().Pkg().Path()
-				// Handle types from ir package or from merged packages (when using -skip-check)
-				// These types (TypeDesc, Value, Instruction, etc.) are represented as pointers in IR
+				// Типы из ir/merged-пакетов представляем указателями.
 				if pkgName == "ir" || pkgName == "backend" || pkgName == "main" {
-					// Check if this is one of the IR types that should be represented as pointers
-					if typeName == "TypeDesc" || typeName == "Value" || typeName == "Instruction" || 
-					   typeName == "BasicBlock" || typeName == "Function" || typeName == "Module" || 
-					   typeName == "Global" {
+					// Проверяем, что это один из внутренних IR-типов.
+					if typeName == "TypeDesc" || typeName == "Value" || typeName == "Instruction" ||
+						typeName == "BasicBlock" || typeName == "Function" || typeName == "Module" ||
+						typeName == "Global" {
 						return ir.PtrI8, nil
 					}
 				}
-				// Handle types from standard library packages that we don't fully support
-				// Replace them with pointers to avoid recursion and unsupported type errors
+				// Неподдержанные типы stdlib заменяем на указатели.
 				if pkgPath == "sync/atomic" || pkgPath == "sync" || pkgPath == "internal/race" ||
-				   pkgPath == "syscall" || pkgPath == "internal/syscall/windows" ||
-				   pkgPath == "internal/syscall/windows/sysdll" || pkgPath == "internal/poll" ||
-				   pkgPath == "internal/syscall/unix" || pkgPath == "time" ||
-				   pkgPath == "go/token" || pkgPath == "go/ast" || pkgPath == "go/types" ||
-				   pkgPath == "go/parser" || pkgPath == "go/importer" || pkgPath == "go/format" ||
-				   pkgPath == "go/printer" || pkgPath == "go/doc" || pkgPath == "go/build" ||
-				   pkgPath == "go/scanner" || pkgPath == "go/constant" ||
-				   pkgPath == "io" || pkgPath == "os" || pkgPath == "path/filepath" ||
-				   pkgPath == "fmt" || pkgPath == "strconv" || pkgPath == "strings" ||
-				   pkgPath == "bytes" || pkgPath == "unicode" || pkgPath == "unicode/utf8" ||
-				   pkgPath == "unicode/utf16" || pkgPath == "path" || pkgPath == "errors" ||
-				   pkgPath == "reflect" || pkgPath == "runtime" || pkgPath == "internal/bytealg" ||
-				   pkgPath == "internal/cpu" || pkgPath == "internal/reflectlite" ||
-				   pkgPath == "internal/unsafeheader" || pkgPath == "unsafe" {
+					pkgPath == "syscall" || pkgPath == "internal/syscall/windows" ||
+					pkgPath == "internal/syscall/windows/sysdll" || pkgPath == "internal/poll" ||
+					pkgPath == "internal/syscall/unix" || pkgPath == "time" ||
+					pkgPath == "go/token" || pkgPath == "go/ast" || pkgPath == "go/types" ||
+					pkgPath == "go/parser" || pkgPath == "go/importer" || pkgPath == "go/format" ||
+					pkgPath == "go/printer" || pkgPath == "go/doc" || pkgPath == "go/build" ||
+					pkgPath == "go/scanner" || pkgPath == "go/constant" ||
+					pkgPath == "io" || pkgPath == "os" || pkgPath == "path/filepath" ||
+					pkgPath == "fmt" || pkgPath == "strconv" || pkgPath == "strings" ||
+					pkgPath == "bytes" || pkgPath == "unicode" || pkgPath == "unicode/utf8" ||
+					pkgPath == "unicode/utf16" || pkgPath == "path" || pkgPath == "errors" ||
+					pkgPath == "reflect" || pkgPath == "runtime" || pkgPath == "internal/bytealg" ||
+					pkgPath == "internal/cpu" || pkgPath == "internal/reflectlite" ||
+					pkgPath == "internal/unsafeheader" || pkgPath == "unsafe" {
 					return ir.PtrI8, nil
 				}
 			}
@@ -3115,34 +3167,34 @@ func goTypeToIRVisited(t types.Type, visited map[string]bool) (*ir.TypeDesc, err
 			key = named.Obj().Pkg().Path() + "." + named.Obj().Name()
 		}
 		if visited[key] {
-			// Allow recursive types for IR types (TypeDesc, Value, etc.)
+			// Для внутренних IR-типов допускаем рекурсию.
 			if named.Obj() != nil {
 				typeName := named.Obj().Name()
 				pkgPath := ""
 				if named.Obj().Pkg() != nil {
 					pkgPath = named.Obj().Pkg().Path()
 				}
-				if typeName == "TypeDesc" || typeName == "Value" || typeName == "Instruction" || 
-				   typeName == "BasicBlock" || typeName == "Function" || typeName == "Module" || 
-				   typeName == "Global" {
+				if typeName == "TypeDesc" || typeName == "Value" || typeName == "Instruction" ||
+					typeName == "BasicBlock" || typeName == "Function" || typeName == "Module" ||
+					typeName == "Global" {
 					return ir.PtrI8, nil
 				}
-				// Handle recursive types from standard library
+				// Для рекурсивных stdlib-типов тоже используем указатели.
 				if pkgPath == "sync/atomic" || pkgPath == "sync" || pkgPath == "internal/race" ||
-				   pkgPath == "syscall" || pkgPath == "internal/syscall/windows" ||
-				   pkgPath == "internal/syscall/windows/sysdll" || pkgPath == "internal/poll" ||
-				   pkgPath == "internal/syscall/unix" || pkgPath == "time" ||
-				   pkgPath == "go/token" || pkgPath == "go/ast" || pkgPath == "go/types" ||
-				   pkgPath == "go/parser" || pkgPath == "go/importer" || pkgPath == "go/format" ||
-				   pkgPath == "go/printer" || pkgPath == "go/doc" || pkgPath == "go/build" ||
-				   pkgPath == "go/scanner" || pkgPath == "go/constant" ||
-				   pkgPath == "io" || pkgPath == "os" || pkgPath == "path/filepath" ||
-				   pkgPath == "fmt" || pkgPath == "strconv" || pkgPath == "strings" ||
-				   pkgPath == "bytes" || pkgPath == "unicode" || pkgPath == "unicode/utf8" ||
-				   pkgPath == "unicode/utf16" || pkgPath == "path" || pkgPath == "errors" ||
-				   pkgPath == "reflect" || pkgPath == "runtime" || pkgPath == "internal/bytealg" ||
-				   pkgPath == "internal/cpu" || pkgPath == "internal/reflectlite" ||
-				   pkgPath == "internal/unsafeheader" || pkgPath == "unsafe" {
+					pkgPath == "syscall" || pkgPath == "internal/syscall/windows" ||
+					pkgPath == "internal/syscall/windows/sysdll" || pkgPath == "internal/poll" ||
+					pkgPath == "internal/syscall/unix" || pkgPath == "time" ||
+					pkgPath == "go/token" || pkgPath == "go/ast" || pkgPath == "go/types" ||
+					pkgPath == "go/parser" || pkgPath == "go/importer" || pkgPath == "go/format" ||
+					pkgPath == "go/printer" || pkgPath == "go/doc" || pkgPath == "go/build" ||
+					pkgPath == "go/scanner" || pkgPath == "go/constant" ||
+					pkgPath == "io" || pkgPath == "os" || pkgPath == "path/filepath" ||
+					pkgPath == "fmt" || pkgPath == "strconv" || pkgPath == "strings" ||
+					pkgPath == "bytes" || pkgPath == "unicode" || pkgPath == "unicode/utf8" ||
+					pkgPath == "unicode/utf16" || pkgPath == "path" || pkgPath == "errors" ||
+					pkgPath == "reflect" || pkgPath == "runtime" || pkgPath == "internal/bytealg" ||
+					pkgPath == "internal/cpu" || pkgPath == "internal/reflectlite" ||
+					pkgPath == "internal/unsafeheader" || pkgPath == "unsafe" {
 					return ir.PtrI8, nil
 				}
 			}
@@ -3152,7 +3204,7 @@ func goTypeToIRVisited(t types.Type, visited map[string]bool) (*ir.TypeDesc, err
 		return goTypeToIRVisited(named.Underlying(), visited)
 	}
 
-	// Now process underlying types
+	// Теперь обрабатываем underlying-типы.
 	underlying := t.Underlying()
 	if underlying == nil {
 		return ir.Void, nil
@@ -3204,16 +3256,13 @@ func goTypeToIRVisited(t types.Type, visited map[string]bool) (*ir.TypeDesc, err
 	case *types.Map:
 		return ir.PtrI8, nil
 	case *types.Interface:
-		// Interfaces are not fully supported in our subset
-		// Represent them as pointers for self-hosting
+		// Интерфейсы в этом подмножестве не моделируем, используем указатель.
 		return ir.PtrI8, nil
 	case *types.Signature:
-		// Function signatures are not fully supported in our subset
-		// Represent them as pointers for self-hosting
+		// Сигнатуры функций не моделируем, используем указатель.
 		return ir.PtrI8, nil
 	case *types.Chan:
-		// Channels are not supported in our subset
-		// Represent them as pointers for self-hosting
+		// Каналы не поддержаны, используем указатель.
 		return ir.PtrI8, nil
 	case *types.Struct:
 		fields := make([]*ir.TypeDesc, tt.NumFields())
@@ -3338,7 +3387,7 @@ func (l *lowerer) stringConstant(s string) *ir.Value {
 	l.strID++
 	gname := fmt.Sprintf(".str.%d", l.strID)
 	if l.prefix != "" {
-		// Remove trailing dot from prefix
+		// убираем завершающую точку у префикса
 		prefix := l.prefix
 		if len(prefix) > 0 && prefix[len(prefix)-1] == '.' {
 			prefix = prefix[:len(prefix)-1]
@@ -3385,13 +3434,13 @@ func escapeCString(b []byte) string {
 	return string(out)
 }
 
-// materializeStringParts: извлекает ptr и len из строки { i8*, i64 }
+// materializeStringParts: извлекает указатель и длину из строки { i8*, i64 }.
 // Выделяет память, сохраняет строку, затем загружает поля через GEP
 func (l *lowerer) materializeStringParts(str *ir.Value) (*ir.Value, *ir.Value) {
 	addr := l.newTemp(ir.PtrTo(ir.String()))
 	l.block.Append(ir.Instruction{Kind: ir.InstrAlloca, Dest: addr, AllocaType: ir.String(), AllocaAlign: alignOfIRType(ir.String())})
 	l.block.Append(ir.Instruction{Kind: ir.InstrStore, StoreSrc: str, StoreDst: addr, StoreAlign: alignOfIRType(ir.String())})
-	// ptr
+	// указатель
 	ptrPtr := l.newTemp(ir.PtrTo(ir.PtrTo(ir.I8)))
 	l.block.Append(ir.Instruction{
 		Kind:          ir.InstrGEP,
@@ -3403,7 +3452,7 @@ func (l *lowerer) materializeStringParts(str *ir.Value) (*ir.Value, *ir.Value) {
 	})
 	ptrVal := l.newTemp(ir.PtrTo(ir.I8))
 	l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: ptrVal, LoadSrc: ptrPtr, LoadAlign: 8})
-	// len
+	// длина
 	lenPtr := l.newTemp(ir.PtrTo(ir.I64))
 	l.block.Append(ir.Instruction{
 		Kind:          ir.InstrGEP,
@@ -3417,7 +3466,6 @@ func (l *lowerer) materializeStringParts(str *ir.Value) (*ir.Value, *ir.Value) {
 	l.block.Append(ir.Instruction{Kind: ir.InstrLoad, Dest: lenVal, LoadSrc: lenPtr, LoadAlign: 8})
 	return ptrVal, lenVal
 }
-
 
 // lowerMapSet: установка значения в map через runtime функцию
 // Ключ и значение сохраняются в буферы, затем приводятся к i8* для передачи в runtime

@@ -22,60 +22,82 @@
 
 ## Грамматика (EBNF)
 ```
-Program        = "package" ident { ImportDecl } { TopDecl } .
-ImportDecl     = "import" string_lit .
-TopDecl        = FuncDecl | VarDecl | ConstDecl | TypeDecl .
-
-FuncDecl       = "func" ident "(" [ ParamList ] ")" [ Result ] Block .
-ParamList      = Param { "," Param } .
-Param          = ident Type .
-Result         = SingleResult | TupleResult .
-SingleResult   = Type .
-TupleResult    = "(" Type [ "," Type ] ")" .
-
-VarDecl        = "var" ident [ Type ] [ "=" Expr ] .
-ConstDecl      = "const" ident "=" Expr .
-TypeDecl       = "type" ident Type .
-
-Block          = "{" { Stmt } "}" .
-Stmt           = DeclStmt | AssignStmt | IfStmt | ForStmt | ReturnStmt
-               | ExprStmt | BreakStmt | ContinueStmt .
-DeclStmt       = VarDecl .
-AssignStmt     = ExprList ( "=" | ":=" ) ExprList .
-IfStmt         = "if" Expr Block [ "else" Block ] .
-ForStmt        = "for" ( [ SimpleStmt ] ";" [ Expr ] ";" [ SimpleStmt ] | Expr | ) Block .
-SimpleStmt     = AssignStmt | ExprStmt .
-ReturnStmt     = "return" [ ReturnValues ] .
-ReturnValues   = EmptyReturn | SingleReturn | TupleReturn .
-EmptyReturn    = .
-SingleReturn   = Expr .
-TupleReturn    = Expr "," Expr .
-BreakStmt      = "break" .
-ContinueStmt   = "continue" .
-ExprStmt       = CallExpr .
-
-Expr           = BinaryExpr | UnaryExpr | PrimaryExpr .
-BinaryExpr     = Expr BinOp Expr .
-BinOp          = "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" | "&" | "|" | "<<" | ">>" .
-UnaryExpr      = ("+" | "-" | "!") Expr .
-PrimaryExpr    = ident | literal | "(" Expr ")" | Selector | Index | Slice | Call .
-Selector       = PrimaryExpr "." ident .
-Index          = PrimaryExpr "[" Expr "]" .
-Slice          = PrimaryExpr "[" [ Expr ] ":" [ Expr ] "]" .
-Call           = PrimaryExpr "(" [ CallArgs ] ")" .
-CallArgs       = Expr { "," Expr } .
-ExprList       = Expr { "," Expr } .
-
-Type           = BasicType | PointerType | ArrayType | SliceType | StructType | MapType .
-BasicType      = "bool" | "int" | "int32" | "int64" | "uint32" | "uint64" | "float64" | "string" | ident .
-PointerType    = "*" Type .
-ArrayType      = "[" integer "]" Type .
-SliceType      = "[]" Type .
-StructType     = "struct" "{" { FieldDecl } "}" .
-FieldDecl      = ident Type .
-MapType        = "map" "[" Type "]" Type .
-literal        = int_lit | float_lit | string_lit | boolean_lit .
-boolean_lit    = "true" | "false" .
+Program = "package" , ident , { ImportDecl } , { TopDecl } ;
+ImportDecl = "import" , string_lit ;
+TopDecl = FuncDecl | VarDecl | ConstDecl | TypeDecl ;
+FuncDecl = "func" , [ Receiver ] , ident , "(" , [ ParamList ] , ")" , [ Result ] , Block ;
+Receiver = "(" , ident , Type , ")" ;
+ParamList = Param , { "," , Param } ;
+Param = ident , Type ;
+Result = Type | "(" , Type , [ "," , Type ] , ")" ;
+VarDecl = "var" , ident , [ Type ] , [ "=" , Expr ] ;
+ConstDecl = "const" , ident , "=" , Expr ;
+TypeDecl = "type" , ident , Type ;
+Block = "{" , { Stmt } , "}" ;
+Stmt = DeclStmt
+ | AssignStmt
+ | IfStmt
+ | ForStmt
+ | ReturnStmt
+ | ExprStmt
+ | BreakStmt
+ | ContinueStmt ;
+DeclStmt = VarDecl ;
+AssignStmt = LhsList , ( "=" | ":=" ) , ExprList ;
+LhsList = Lhs , { "," , Lhs } ;
+Lhs = PrimaryExpr ;
+ExprList = Expr , { "," , Expr } ;
+IfStmt = "if" , Expr , Block , [ "else" , Block ] ;
+ForStmt = "for" , ( ForClause | Expr | ) , Block ;
+ForClause = [ SimpleStmt ] , ";" , [ Expr ] , ";" , [ SimpleStmt ] ;
+SimpleStmt = AssignStmt | ExprStmt ;
+ReturnStmt = "return" , [ ReturnValues ] ;
+ReturnValues = Expr | Expr , "," , Expr ;
+BreakStmt = "break" ;
+ContinueStmt = "continue" ;
+ExprStmt = Call ;
+Expr = OrExpr ;
+OrExpr = AndExpr , { "||" , AndExpr } ;
+AndExpr = CmpExpr , { "&&" , CmpExpr } ;
+CmpExpr = AddExpr , { CmpOp , AddExpr } ;
+CmpOp = "==" | "!=" | "<" | "<=" | ">" | ">=" ;
+AddExpr = MulExpr , { AddOp , MulExpr } ;
+AddOp = "+" | "-" | "|" ;
+MulExpr = UnaryExpr , { MulOp , UnaryExpr } ;
+MulOp = "*" | "/" | "%" | "&" | "<<" | ">>" ;
+UnaryExpr = { UnaryOp } , PrimaryExpr ;
+UnaryOp = "&" | "-" | "!" ;
+PrimaryExpr = Operand , { Selector | Index | Slice | Call } ;
+Operand = ident | literal | "(" , Expr , ")" ;
+Selector = "." , ident ;
+Index = "[" , Expr , "]" ;
+Slice = "[" , [ Expr ] , ":" , [ Expr ] , "]" ;
+Call = "(" , [ CallArgs ] , ")" ;
+CallArgs = Expr , { "," , Expr } ;
+Type = BasicType | PointerType | ArrayType | SliceType | StructType | MapType ;
+BasicType = "bool" | "int" | "int32" | "int64" | "uint32" | "uint64" | "float64" | "string" | ident ;
+PointerType = "*" , Type ;
+ArrayType = "[" , integer , "]" , Type ;
+SliceType = "[" , "]" , Type ;
+StructType = "struct" , "{" , { FieldDecl } , "}" ;
+FieldDecl = ident , Type ;
+MapType = "map" , "[" , Type , "]" , Type ;
+literal = int_lit | float_lit | string_lit | boolean_lit ;
+boolean_lit = "true" | "false" ;
+int_lit = dec_digit , { dec_digit } ;
+float_lit = dec_digit , { dec_digit } , "." , dec_digit , { dec_digit } ;
+string_lit = DQUOTE , { string_char } , DQUOTE ;
+string_char = Any \ { DQUOTE | LF } ;
+integer = int_lit ;
+ident = ident_start , { ident_continue } ;
+ident_start = AnyLetter | "_" ;
+ident_continue = AnyLetter | AnyDigit | "_" ;
+dec_digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+DQUOTE = "\"" ;
+LF = "\n" ;
+Any — произвольный символ Юникода.
+AnyLetter — любой буквенный символ Юникода.
+AnyDigit — любой десятичный цифровой символ Юникода.
 ```
 
 ### Сборка и запуск (.ll → .o → .exe)
@@ -123,3 +145,4 @@ clang -c -o llvm.o llvm.ll
 ```
 Всплывет предупреждение, но все работает
 Собирать дальше не имеет смысла, нет точки входа
+

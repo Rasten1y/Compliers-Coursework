@@ -33,7 +33,7 @@ func BuildIR(prog *Program) (*ir.Module, error) {
 	return mod, nil
 }
 
-// defaultTarget: определяет target triple и datalayout в зависимости от ОС
+// defaultTarget: выбирает target triple и data layout по ОС.
 func defaultTarget() (string, string) {
 	if runtime.GOOS == "windows" {
 		return "x86_64-pc-windows-msvc", "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
@@ -46,7 +46,7 @@ func buildInto(prog *Program, mod *ir.Module) error {
 		prog: prog,
 		mod:  mod,
 	}
-	// Префикс пакета нужен для генерации правильных имён функций (pkg.FuncName)
+	// Префикс пакета нужен для корректных имён функций (pkg.FuncName).
 	if prog.PkgName != "" && prog.PkgName != "main" {
 		l.prefix = prog.PkgName + "."
 	}

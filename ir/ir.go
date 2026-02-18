@@ -143,7 +143,7 @@ func NewParam(name string, ty *TypeDesc) *Value {
 	return &Value{name: name, ty: ty, kind: ValueParam}
 }
 
-// Helper functions for self-hosted backend to access unexported fields
+// Вспомогательные функции для доступа к неэкспортируемым полям.
 func ValueName(v *Value) string {
 	if v == nil {
 		return ""
@@ -154,7 +154,7 @@ func ValueName(v *Value) string {
 	return v.name
 }
 
-// ValueType: helper функция для доступа к полю type (неэкспортированному)
+// ValueType: доступ к неэкспортируемому полю type.
 func ValueType(v *Value) *TypeDesc {
 	if v == nil {
 		return nil
@@ -610,7 +610,7 @@ func TypeDescString(t *TypeDesc) string {
 	} else if t.Kind == KindPointer {
 		return TypeDescString(t.Elem) + "*"
 	} else if t.Kind == KindStruct {
-		// Build string manually without strings.Join
+		// Собираем строку вручную без strings.Join.
 		if len(t.Fields) == 0 {
 			return "{ }"
 		}
@@ -620,7 +620,7 @@ func TypeDescString(t *TypeDesc) string {
 		}
 		return result + " }"
 	} else if t.Kind == KindArray {
-		// Convert int to string manually
+		// преобразуем int в строку вручную
 		lenStr := formatInt64Helper(int64(t.Len))
 		return "[" + lenStr + " x " + TypeDescString(t.Elem) + "]"
 	} else if t.Kind == KindSlice {
@@ -670,7 +670,6 @@ func NewConstant(raw string, ty *TypeDesc) *Value {
 	return &Value{name: raw, Raw: raw, ty: ty, kind: ValueConstant}
 }
 
-
 type InstrKind int
 
 const (
@@ -710,7 +709,7 @@ const (
 
 	And BinOpKind = "and"
 	Or  BinOpKind = "or"
-	
+
 	Shl  BinOpKind = "shl"
 	LShr BinOpKind = "lshr"
 	AShr BinOpKind = "ashr"
@@ -757,41 +756,41 @@ const (
 type Instruction struct {
 	Kind InstrKind
 
-	// Common destination (for value-producing instructions).
+	// Общее поле назначения для инструкций, которые дают значение.
 	Dest *Value
 
 	// BinOp
-	BinOp  BinOpKind
-	X, Y   *Value
+	BinOp BinOpKind
+	X, Y  *Value
 
 	// Return
 	RetVals []*Value
 
-	// Call / CallVoid
+	// вызов / вызов без возврата
 	CallName string
 	CallArgs []*Value
 	CallRet  *TypeDesc
 	SretType *TypeDesc
 
-	// Conv
+	// конверсия
 	ConvOp  ConvOp
 	ConvSrc *Value
 	ConvTo  *TypeDesc
 
-	// Alloca
-	AllocaType *TypeDesc
+	// выделение памяти на стеке
+	AllocaType  *TypeDesc
 	AllocaAlign int64
 
-	// Load
+	// чтение из памяти
 	LoadSrc   *Value
 	LoadAlign int64
 
-	// Store
+	// запись в память
 	StoreSrc   *Value
 	StoreDst   *Value
 	StoreAlign int64
 
-	// GEP
+	// вычисление адреса элемента (GEP)
 	GepSrc        *Value
 	GepPointee    *TypeDesc
 	GepIndices    []*Value
@@ -810,21 +809,20 @@ type Instruction struct {
 	// Br
 	BrTarget string
 
-	// CondBr
+	// Условный переход.
 	CondCond  *Value
 	CondTrue  string
 	CondFalse string
 
-	// Bitcast
+	// преобразование указателя без изменения данных (bitcast)
 	BitcastSrc    *Value
 	BitcastTarget *TypeDesc
 
-	// Memcpy
+	// копирование памяти
 	MemcpyDest *Value
 	MemcpySrc  *Value
 	MemcpySize *Value
 }
-
 
 type BasicBlock struct {
 	Name       string
@@ -862,10 +860,10 @@ func (bb *BasicBlock) Append(inst Instruction) {
 }
 
 type Function struct {
-	Name    string
-	Params  []*Value
-	Results []*TypeDesc
-	Blocks  []*BasicBlock
+	Name     string
+	Params   []*Value
+	Results  []*TypeDesc
+	Blocks   []*BasicBlock
 	SretType *TypeDesc
 }
 
@@ -994,7 +992,6 @@ func GetGlobalValue(g *Global) string {
 	return g.Value
 }
 
-
 func formatValue(v *Value) string {
 	if v == nil {
 		return ""
@@ -1004,7 +1001,7 @@ func formatValue(v *Value) string {
 	}
 	if v.kind == ValueConstant && v.Raw != "" {
 		if v.ty != nil && v.ty.Kind == KindBasic && v.ty.Basic == "double" {
-			// Check manually if v.Raw contains any of ".eE"
+			// Вручную проверяем, есть ли в v.Raw символы ".eE".
 			hasAny := false
 			chars := ".eE"
 			for i := 0; i < len(v.Raw); i = i + 1 {

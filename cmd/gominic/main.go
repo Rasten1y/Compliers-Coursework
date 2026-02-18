@@ -51,7 +51,6 @@ func main() {
 	var verbose bool
 	var llOut string
 	var clangPath string
-	var skipCheck bool
 
 	flag.StringVar(&output, "o", "a.out", "output file")
 	flag.BoolVar(&emitIR, "S", false, "emit LLVM IR and exit")
@@ -59,7 +58,6 @@ func main() {
 	flag.BoolVar(&verbose, "v", false, "verbose output")
 	flag.StringVar(&llOut, "ll", "", "write LLVM IR to file instead of stdout when using -S")
 	flag.StringVar(&clangPath, "cc", "clang", "C compiler (used also to compile .ll)")
-	flag.BoolVar(&skipCheck, "skip-check", false, "skip subset checks (useful for self-hosting)")
 	flag.Parse()
 
 	files := flag.Args()
@@ -70,7 +68,6 @@ func main() {
 	if verbose {
 		vprintf("compiling files\n")
 	}
-	frontend.SetSkipSubsetCheck(skipCheck)
 	parseRes := parseAndCheckAllWrapper(files)
 	if parseRes.err != nil {
 		fatalf("frontend failed: " + parseRes.err.Error())
@@ -90,7 +87,7 @@ func main() {
 
 	irText := backend.EmitModule(mod)
 
-	// runtime objects selection
+	// Какие runtime-объекты нужно собрать и линковать.
 	rtEntries := []struct {
 		src string
 		out string

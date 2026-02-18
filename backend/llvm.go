@@ -68,11 +68,10 @@ func EmitModule(mod *ir.Module) string {
 	parts = strBufWriteString(parts, "declare { { i8*, i64 }, { { i8*, i64 }*, i64, i64 }, { { i8*, i64 }*, i64, i64 }, { i8*, i64 }, i8*, i8*, i8*, { i8***, i64, i64 }, i8**, i8**, i8**, i8*, i8*, i8*, i8*, { i8**, i64, i64 }, { i8**, i64, i64 }, { i8**, i64, i64 }, i8*, i8*, { i8*, i64, i64 }, i8*, { { i8*, i64 }, { i8*, i64 } } }* @exec.Command({ i8*, i64 }, { { i8*, i64 }*, i64, i64 })\n")
 	parts = strBufWriteString(parts, "declare { { { i8**, { i8***, i64, i64 }, i8**, i8**, { i8*, i64 } }**, i64, i64 }, i8* } @frontend.ParseAndCheckAll({ { i8*, i64 }*, i64, i64 })\n")
 	parts = strBufWriteString(parts, "declare { i8**, i8* } @frontend.BuildModule({ { i8**, { i8***, i64, i64 }, i8**, i8**, { i8*, i64 } }**, i64, i64 })\n")
-	parts = strBufWriteString(parts, "declare void @frontend.SetSkipSubsetCheck(i1)\n")
 	parts = strBufWriteString(parts, "declare i8* @os.WriteFile({ i8*, i64 }, { i8*, i64, i64 }, i64)\n")
 	parts = strBufWriteString(parts, "declare void @os.File.WriteString(i8**, { i8*, i64 })\n")
 	parts = strBufWriteString(parts, "declare void @os.Exit(i64)\n")
-	// Методы ir.*: при компиляции с -skip-check все методы из ir/ir.go определяются в LLVM IR
+	// Методы ir.* определяются при компиляции ir/ir.go в LLVM IR.
 	// Не объявляем их здесь, чтобы избежать конфликта (redefinition)
 	parts = strBufWriteString(parts, "declare { i8*, i64 } @types.Package.Name(i8**)\n")
 	parts = strBufWriteString(parts, "@os.Stderr = external global i8*\n")
@@ -88,17 +87,17 @@ func EmitModule(mod *ir.Module) string {
 	parts = strBufWriteString(parts, "@gominic.false = external global i1\n")
 	parts = strBufWriteString(parts, "@gominic.true = external global i1\n")
 	parts = strBufWriteString(parts, "@gominic.nil = external global i8**\n")
-	// Глобальные переменные для методов ir.* (используются как receiver при -skip-check)
+	// Глобальные переменные для методов ir.* (как receiver).
 	parts = strBufWriteString(parts, "@ir.bb = external global i8***\n")
 	parts = strBufWriteString(parts, "@ir.m = external global i8***\n")
 	parts = strBufWriteString(parts, "@ir.t = external global i8***\n")
 	parts = strBufWriteString(parts, "@ir.v = external global i8***\n")
 	parts = strBufWriteString(parts, "@ir.fn = external global i8***\n")
 	parts = strBufWriteString(parts, "@ir.nil = external global i8***\n")
-	// Declare ir package boolean constants (false and true)
+	// Константы булевых значений для пакета ir.
 	parts = strBufWriteString(parts, "@ir.false = external global i1\n")
 	parts = strBufWriteString(parts, "@ir.true = external global i1\n\n")
-	// Also declare without prefix for compatibility (in case prefix is not added)
+	// Те же символы без префикса для совместимости.
 	parts = strBufWriteString(parts, "@Stderr = external global i8*\n")
 	parts = strBufWriteString(parts, "@Stdout = external global i8*\n")
 	parts = strBufWriteString(parts, "@Stdin = external global i8*\n\n")
@@ -111,7 +110,7 @@ func EmitModule(mod *ir.Module) string {
 		alignGlobal := ""
 		alignValGlobal := ir.GetGlobalAlign(&g)
 		if alignValGlobal > 0 {
-			// Inline FormatInt64 logic
+			// Встроенная логика FormatInt64.
 			alignStrGlobal := ""
 			if alignValGlobal == 0 {
 				alignStrGlobal = "0"
@@ -147,15 +146,15 @@ func EmitModule(mod *ir.Module) string {
 	modFunctions := ir.GetModuleFunctions(mod)
 	for iFunc := 0; iFunc < len(modFunctions); iFunc = iFunc + 1 {
 		fn := modFunctions[iFunc]
-		// Inline emitFunction logic
+		// Встроенная логика emitFunction.
 		var params []string
 		fnParams := ir.GetFunctionParams(fn)
 		for iParam := 0; iParam < len(fnParams); iParam = iParam + 1 {
-		p := fnParams[iParam]
-		var paramStr string
-		var nilTypeDesc3 *ir.TypeDesc
-		if iParam == 0 && ir.GetFunctionSretType(fn) != nilTypeDesc3 {
-			paramStr = "sret(" + llvmType(ir.GetFunctionSretType(fn)) + ") " + llvmType(valueType(p)) + " %" + valueName(p)
+			p := fnParams[iParam]
+			var paramStr string
+			var nilTypeDesc3 *ir.TypeDesc
+			if iParam == 0 && ir.GetFunctionSretType(fn) != nilTypeDesc3 {
+				paramStr = "sret(" + llvmType(ir.GetFunctionSretType(fn)) + ") " + llvmType(valueType(p)) + " %" + valueName(p)
 			} else if valueByVal(p) {
 				paramStr = llvmType(valueType(p)) + " byval(" + llvmType(valueByValType(p)) + ") %" + valueName(p)
 			} else {
@@ -176,7 +175,7 @@ func EmitModule(mod *ir.Module) string {
 			} else if resCount == 1 {
 				result = llvmType(fnResults[0])
 			} else {
-				// TODO: support multiple return values via struct or sret lowering.
+				// TODO: поддержать несколько возвращаемых значений через struct или sret lowering.
 				result = llvmType(ir.GetVoidType())
 			}
 		}
@@ -189,13 +188,13 @@ func EmitModule(mod *ir.Module) string {
 			bbInstrs := ir.GetBasicBlockInstrs(bb)
 			for iInstr := 0; iInstr < len(bbInstrs); iInstr = iInstr + 1 {
 				parts = strBufWriteString(parts, "  "+renderInstr(bbInstrs[iInstr])+"\n")
-	}
+			}
 			terminator := ir.GetBasicBlockTerminator(bb)
 			var nilInstr1 *ir.Instruction
-		if terminator != nilInstr1 {
+			if terminator != nilInstr1 {
 				parts = strBufWriteString(parts, "  "+renderInstr(*terminator)+"\n")
 			} else {
-				// Fallback to avoid invalid IR.
+				// запасной путь, чтобы не получить невалидный IR.
 				parts = strBufWriteString(parts, "  unreachable\n")
 			}
 		}
@@ -208,7 +207,7 @@ type strBuf struct {
 	parts []string
 }
 
-// Plain helper functions instead of methods to simplify self-host lowering.
+// Простые вспомогательные функции вместо методов для самоприменимости.
 func strBufWriteString(parts []string, s string) []string {
 	return append(parts, s)
 }
@@ -226,7 +225,7 @@ type emitter struct {
 }
 
 func emitGlobals(parts []string, globals []ir.Global, msvc bool) []string {
-	// runtime declarations
+	// объявления runtime-функций
 	parts = strBufWriteString(parts, "declare void @gominic_memcpy(i8*, i8*, i64)\n")
 	parts = strBufWriteString(parts, "declare void @gominic_abort()\n")
 	parts = strBufWriteString(parts, "declare i8* @gominic_makeSlice(i64, i64, i64)\n")
@@ -255,7 +254,7 @@ func emitGlobals(parts []string, globals []ir.Global, msvc bool) []string {
 		alignGlobal := ""
 		alignValGlobal := ir.GetGlobalAlign(&g)
 		if alignValGlobal > 0 {
-			// Inline FormatInt64 logic
+			// Встроенная логика FormatInt64.
 			alignStrGlobal := ""
 			if alignValGlobal == 0 {
 				alignStrGlobal = "0"
@@ -320,7 +319,7 @@ func emitFunction(parts []string, fn *ir.Function) []string {
 		} else if resCount == 1 {
 			result = llvmType(fnResults[0])
 		} else {
-			// TODO: support multiple return values via struct or sret lowering.
+			// TODO: поддержать несколько возвращаемых значений через struct или sret lowering.
 			result = llvmType(ir.GetVoidType())
 		}
 	}
@@ -339,7 +338,7 @@ func emitFunction(parts []string, fn *ir.Function) []string {
 		if terminator != nilInstr1 {
 			parts = strBufWriteString(parts, "  "+renderInstr(*terminator)+"\n")
 		} else {
-			// Fallback to avoid invalid IR.
+			// запасной путь, чтобы не получить невалидный IR.
 			parts = strBufWriteString(parts, "  unreachable\n")
 		}
 	}
@@ -358,7 +357,7 @@ func EmitBasicBlock(parts []string, bb *ir.BasicBlock) []string {
 	if terminator != nilInstr2 {
 		parts = strBufWriteString(parts, "  "+renderInstr(*terminator)+"\n")
 	} else {
-		// Fallback to avoid invalid IR.
+		// запасной путь, чтобы не получить невалидный IR.
 		parts = strBufWriteString(parts, "  unreachable\n")
 	}
 	return parts
@@ -472,7 +471,7 @@ func renderInstr(inst ir.Instruction) string {
 		alignAlloca := ""
 		alignValAlloca := ir.GetInstrAllocaAlign(&inst)
 		if alignValAlloca > 0 {
-			// Inline FormatInt64 logic
+			// Встроенная логика FormatInt64.
 			alignStrAlloca := ""
 			if alignValAlloca == 0 {
 				alignStrAlloca = "0"
@@ -506,7 +505,7 @@ func renderInstr(inst ir.Instruction) string {
 		alignLoad := ""
 		alignValLoad := ir.GetInstrLoadAlign(&inst)
 		if alignValLoad > 0 {
-			// Inline FormatInt64 logic
+			// Встроенная логика FormatInt64.
 			alignStrLoad := ""
 			if alignValLoad == 0 {
 				alignStrLoad = "0"
@@ -538,19 +537,19 @@ func renderInstr(inst ir.Instruction) string {
 	}
 	if ir.IsInstrStore(k) {
 		srcType := valueType(ir.GetInstrStoreSrc(&inst))
-		// Skip store instructions with void type (invalid in LLVM IR)
+		// Пропускаем store для void (это невалидно в LLVM IR).
 		var nilTypeDescStore *ir.TypeDesc
 		if srcType == nilTypeDescStore {
 			return "; store void skipped (invalid in LLVM IR)"
 		}
-		// Check if type is void by checking Basic field
+		// Проверяем, что тип действительно void.
 		if ir.IsKindBasic(ir.GetTypeKind(srcType)) && ir.GetTypeDescBasic(srcType) == "void" {
 			return "; store void skipped (invalid in LLVM IR)"
 		}
 		alignStore := ""
 		alignValStore := ir.GetInstrStoreAlign(&inst)
 		if alignValStore > 0 {
-			// Inline FormatInt64 logic
+			// Встроенная логика FormatInt64.
 			alignStrStore := ""
 			if alignValStore == 0 {
 				alignStrStore = "0"
@@ -633,7 +632,7 @@ func valStr(v *ir.Value) string {
 		var nilTypeDesc8 *ir.TypeDesc
 		if vt != nilTypeDesc8 && ir.IsKindBasic(ir.GetTypeKind(vt)) && ir.GetTypeDescBasic(vt) == "double" {
 			raw := valueName(v)
-			// Inline containsAny check
+			// Встроенная проверка containsAny.
 			chars := ".eE"
 			hasAny := 0 == 1
 			for iAny := 0; iAny < len(raw); iAny = iAny + 1 {
@@ -652,10 +651,10 @@ func valStr(v *ir.Value) string {
 			}
 			return raw
 		}
-		// For integer types, convert hexadecimal constants (0x...) to decimal
+		// Для целых переводим шестнадцатеричные константы (0x...) в десятичные.
 		raw := valueName(v)
 		if len(raw) > 2 && raw[0] == 48 && (raw[1] == 120 || raw[1] == 88) {
-			// Parse hexadecimal and convert to decimal
+			// Разбираем hex и переводим в десятичный вид.
 			hexStr := raw[2:]
 			val := int64(0)
 			for iHex := 0; iHex < len(hexStr); iHex = iHex + 1 {
@@ -696,7 +695,7 @@ func valStr(v *ir.Value) string {
 				}
 				val = val*16 + chVal
 			}
-			// Inline FormatInt64 logic
+			// Встроенная логика FormatInt64.
 			if val == 0 {
 				return "0"
 			}
@@ -752,7 +751,7 @@ func emitTargetHeader(parts []string, mod *ir.Module, msvc *bool) []string {
 	if triple == "" {
 		triple = "x86_64-pc-linux-gnu"
 	}
-	// Inline contains check to avoid function call
+	// Встроенная проверка contains без отдельного вызова функции.
 	substr := "windows-msvc"
 	msvcVal := 0 == 1
 	if len(substr) <= len(triple) {
@@ -780,7 +779,7 @@ func emitTargetHeader(parts []string, mod *ir.Module, msvc *bool) []string {
 	return parts
 }
 
-// joinStrings: замена strings.Join для самоприменимости
+// joinStrings: замена strings.Join для самоприменимости.
 func joinStrings(parts []string, sep string) string {
 	if len(parts) == 0 {
 		return ""
@@ -794,8 +793,6 @@ func joinStrings(parts []string, sep string) string {
 	}
 	return result
 }
-
-
 
 func FormatInt64(n int64) string {
 	if n == 0 {
