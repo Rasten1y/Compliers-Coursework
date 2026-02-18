@@ -255,52 +255,17 @@ for.end11:
   %t45 = load { i64*, i64, i64 }, { i64*, i64, i64 }* %sl.addr9, align 8
   %t46 = alloca { i64*, i64, i64 } , align 8
   store { i64*, i64, i64 } %t45, { i64*, i64, i64 }* %t46, align 8
-  %t47 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t46, i32 0, i32 1
-  %t48 = load i64, i64* %t47, align 8
-  %t49 = add i64 %t48, 1
-  %t50 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t46, i32 0, i32 2
-  %t51 = load i64, i64* %t50, align 8
-  %t52 = call i64* @gominic_makeSlice(i64 %t49, i64 %t49, i64 8)
-  %t53 = getelementptr inbounds i64, i64* %t52, i64 0
-  store i64 5, i64* %t53, align 8
-  %t54 = alloca { i64*, i64, i64 } , align 8
-  %t55 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t54, i32 0, i32 0
-  store i64* %t52, i64** %t55, align 8
-  %t56 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t54, i32 0, i32 1
-  store i64 %t49, i64* %t56, align 8
-  %t57 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t54, i32 0, i32 2
-  store i64 %t49, i64* %t57, align 8
-  %t58 = load { i64*, i64, i64 }, { i64*, i64, i64 }* %t54, align 8
-  store { i64*, i64, i64 } %t58, { i64*, i64, i64 }* %sl.addr9, align 8
-  %t59 = load { i64*, i64, i64 }, { i64*, i64, i64 }* %sl.addr9, align 8
-  %t60 = alloca { i64*, i64, i64 } , align 8
-  store { i64*, i64, i64 } %t59, { i64*, i64, i64 }* %t60, align 8
-  %t61 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t60, i32 0, i32 1
-  %t62 = load i64, i64* %t61, align 8
-  %t63 = call i8* @gominic_map_new(i64 8, i64 8, i32 0)
-  %m.addr10 = alloca i8* , align 8
-  store i8* %t63, i8** %m.addr10, align 8
-  %t64 = load i8*, i8** %m.addr10, align 8
-  %t65 = load i64, i64* %c.addr5, align 8
-  %t66 = alloca i64 , align 8
-  store i64 1, i64* %t66, align 8
-  %t67 = alloca i64 , align 8
-  store i64 %t65, i64* %t67, align 8
-  %t68 = bitcast i64* %t66 to i8*
-  %t69 = bitcast i64* %t67 to i8*
-  call void @gominic_map_set(i8* %t64, i8* %t68, i8* %t69)
-  %t70 = load i8*, i8** %m.addr10, align 8
-  %t71 = alloca i64 , align 8
-  store i64 1, i64* %t71, align 8
-  %t72 = alloca i64 , align 8
-  %t73 = bitcast i64* %t71 to i8*
-  %t74 = bitcast i64* %t72 to i8*
-  %t75 = call i1 @gominic_map_get(i8* %t70, i8* %t73, i8* %t74)
-  %t76 = load i64, i64* %t72, align 8
-  %ok.addr11 = alloca i1 , align 1
-  store i1 %t75, i1* %ok.addr11, align 1
-  %t77 = load i1, i1* %ok.addr11, align 1
-  br i1 %t77, label %then18, label %else19
+  %t47 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t46, i32 0, i32 0
+  %t48 = load i64*, i64** %t47, align 8
+  %t49 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t46, i32 0, i32 1
+  %t50 = load i64, i64* %t49, align 8
+  %t51 = add i64 %t50, 1
+  %t52 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t46, i32 0, i32 2
+  %t53 = load i64, i64* %t52, align 8
+  %t54 = icmp sgt i64 %t51, %t53
+  %t55 = alloca i64* , align 8
+  %t56 = alloca i64 , align 8
+  br i1 %t54, label %append.grow18, label %append.nogrow19
 then12:
   br label %for.end11
 else13:
@@ -315,51 +280,107 @@ else16:
   br label %endif17
 endif17:
   br label %for.cond8
-then18:
-  %t78 = load i64, i64* %c.addr5, align 8
-  %t79 = load i8*, i8** %m.addr10, align 8
-  %t80 = alloca i64 , align 8
-  store i64 1, i64* %t80, align 8
+append.grow18:
+  %t57 = call i64* @gominic_makeSlice(i64 %t51, i64 %t51, i64 8)
+  %t58 = mul i64 %t50, 8
+  %t59 = bitcast i64* %t57 to i8*
+  %t60 = bitcast i64* %t48 to i8*
+  call void @gominic_memcpy(i8* %t59, i8* %t60, i64 %t58)
+  store i64* %t57, i64** %t55, align 8
+  store i64 %t51, i64* %t56, align 8
+  br label %append.cont20
+append.nogrow19:
+  store i64* %t48, i64** %t55, align 8
+  store i64 %t53, i64* %t56, align 8
+  br label %append.cont20
+append.cont20:
+  %t61 = load i64*, i64** %t55, align 8
+  %t62 = load i64, i64* %t56, align 8
+  %t63 = getelementptr inbounds i64, i64* %t61, i64 %t50
+  store i64 5, i64* %t63, align 8
+  %t64 = alloca { i64*, i64, i64 } , align 8
+  %t65 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t64, i32 0, i32 0
+  store i64* %t61, i64** %t65, align 8
+  %t66 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t64, i32 0, i32 1
+  store i64 %t51, i64* %t66, align 8
+  %t67 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t64, i32 0, i32 2
+  store i64 %t62, i64* %t67, align 8
+  %t68 = load { i64*, i64, i64 }, { i64*, i64, i64 }* %t64, align 8
+  store { i64*, i64, i64 } %t68, { i64*, i64, i64 }* %sl.addr9, align 8
+  %t69 = load { i64*, i64, i64 }, { i64*, i64, i64 }* %sl.addr9, align 8
+  %t70 = alloca { i64*, i64, i64 } , align 8
+  store { i64*, i64, i64 } %t69, { i64*, i64, i64 }* %t70, align 8
+  %t71 = getelementptr inbounds { i64*, i64, i64 }, { i64*, i64, i64 }* %t70, i32 0, i32 1
+  %t72 = load i64, i64* %t71, align 8
+  %t73 = call i8* @gominic_map_new(i64 8, i64 8, i32 0)
+  %m.addr10 = alloca i8* , align 8
+  store i8* %t73, i8** %m.addr10, align 8
+  %t74 = load i8*, i8** %m.addr10, align 8
+  %t75 = load i64, i64* %c.addr5, align 8
+  %t76 = alloca i64 , align 8
+  store i64 1, i64* %t76, align 8
+  %t77 = alloca i64 , align 8
+  store i64 %t75, i64* %t77, align 8
+  %t78 = bitcast i64* %t76 to i8*
+  %t79 = bitcast i64* %t77 to i8*
+  call void @gominic_map_set(i8* %t74, i8* %t78, i8* %t79)
+  %t80 = load i8*, i8** %m.addr10, align 8
   %t81 = alloca i64 , align 8
-  %t82 = bitcast i64* %t80 to i8*
+  store i64 1, i64* %t81, align 8
+  %t82 = alloca i64 , align 8
   %t83 = bitcast i64* %t81 to i8*
-  call i1 @gominic_map_get(i8* %t79, i8* %t82, i8* %t83)
-  %t84 = load i64, i64* %t81, align 8
-  %t85 = add i64 %t78, %t84
-  store i64 %t85, i64* %c.addr5, align 8
-  br label %endif20
-else19:
-  br label %endif20
-endif20:
-  %t86 = alloca { i64, { i8*, i64 } } , align 8
-  %t87 = load i64, i64* %c.addr5, align 8
-  %t88 = getelementptr inbounds { i64, { i8*, i64 } }, { i64, { i8*, i64 } }* %t86, i32 0, i32 0
-  store i64 %t87, i64* %t88, align 8
-  %t89 = load { i8*, i64 }, { i8*, i64 }* %msg.addr7, align 8
-  %t90 = getelementptr inbounds { i64, { i8*, i64 } }, { i64, { i8*, i64 } }* %t86, i32 0, i32 1
-  store { i8*, i64 } %t89, { i8*, i64 }* %t90, align 8
-  %t91 = load { i64, { i8*, i64 } }, { i64, { i8*, i64 } }* %t86, align 8
-  %st.addr12 = alloca { i64, { i8*, i64 } } , align 8
-  store { i64, { i8*, i64 } } %t91, { i64, { i8*, i64 } }* %st.addr12, align 8
-  %t92 = load { i64, { i8*, i64 } }, { i64, { i8*, i64 } }* %st.addr12, align 8
-  call void @print({ i8*, i64 } { i8* getelementptr inbounds ([14 x i8], [14 x i8]* @.str.4, i32 0, i32 0), i64 13 })
-  %t93 = sitofp i64 1 to double
-  %t94 = fadd double %t93, 2.5
-  %f.addr13 = alloca double , align 8
-  store double %t94, double* %f.addr13, align 8
-  %t95 = load double, double* %f.addr13, align 8
-  %t96 = sitofp i64 0 to double
-  %t97 = fcmp ogt double %t95, %t96
-  br i1 %t97, label %then21, label %else22
+  %t84 = bitcast i64* %t82 to i8*
+  %t85 = call i1 @gominic_map_get(i8* %t80, i8* %t83, i8* %t84)
+  %t86 = load i64, i64* %t82, align 8
+  %ok.addr11 = alloca i1 , align 1
+  store i1 %t85, i1* %ok.addr11, align 1
+  %t87 = load i1, i1* %ok.addr11, align 1
+  br i1 %t87, label %then21, label %else22
 then21:
-  call void @print({ i8*, i64 } { i8* getelementptr inbounds ([10 x i8], [10 x i8]* @.str.5, i32 0, i32 0), i64 9 })
+  %t88 = load i64, i64* %c.addr5, align 8
+  %t89 = load i8*, i8** %m.addr10, align 8
+  %t90 = alloca i64 , align 8
+  store i64 1, i64* %t90, align 8
+  %t91 = alloca i64 , align 8
+  %t92 = bitcast i64* %t90 to i8*
+  %t93 = bitcast i64* %t91 to i8*
+  call i1 @gominic_map_get(i8* %t89, i8* %t92, i8* %t93)
+  %t94 = load i64, i64* %t91, align 8
+  %t95 = add i64 %t88, %t94
+  store i64 %t95, i64* %c.addr5, align 8
   br label %endif23
 else22:
   br label %endif23
 endif23:
+  %t96 = alloca { i64, { i8*, i64 } } , align 8
+  %t97 = load i64, i64* %c.addr5, align 8
+  %t98 = getelementptr inbounds { i64, { i8*, i64 } }, { i64, { i8*, i64 } }* %t96, i32 0, i32 0
+  store i64 %t97, i64* %t98, align 8
+  %t99 = load { i8*, i64 }, { i8*, i64 }* %msg.addr7, align 8
+  %t100 = getelementptr inbounds { i64, { i8*, i64 } }, { i64, { i8*, i64 } }* %t96, i32 0, i32 1
+  store { i8*, i64 } %t99, { i8*, i64 }* %t100, align 8
+  %t101 = load { i64, { i8*, i64 } }, { i64, { i8*, i64 } }* %t96, align 8
+  %st.addr12 = alloca { i64, { i8*, i64 } } , align 8
+  store { i64, { i8*, i64 } } %t101, { i64, { i8*, i64 } }* %st.addr12, align 8
+  %t102 = load { i64, { i8*, i64 } }, { i64, { i8*, i64 } }* %st.addr12, align 8
+  call void @print({ i8*, i64 } { i8* getelementptr inbounds ([14 x i8], [14 x i8]* @.str.4, i32 0, i32 0), i64 13 })
+  %t103 = sitofp i64 1 to double
+  %t104 = fadd double %t103, 2.5
+  %f.addr13 = alloca double , align 8
+  store double %t104, double* %f.addr13, align 8
+  %t105 = load double, double* %f.addr13, align 8
+  %t106 = sitofp i64 0 to double
+  %t107 = fcmp ogt double %t105, %t106
+  br i1 %t107, label %then24, label %else25
+then24:
+  call void @print({ i8*, i64 } { i8* getelementptr inbounds ([10 x i8], [10 x i8]* @.str.5, i32 0, i32 0), i64 9 })
+  br label %endif26
+else25:
+  br label %endif26
+endif26:
   call void @print({ i8*, i64 } { i8* getelementptr inbounds ([13 x i8], [13 x i8]* @.str.6, i32 0, i32 0), i64 12 })
-  %t98 = load i64, i64* %c.addr5, align 8
-  call void @printInt(i64 %t98)
+  %t108 = load i64, i64* %c.addr5, align 8
+  call void @printInt(i64 %t108)
   call void @println()
   call void @print({ i8*, i64 } { i8* getelementptr inbounds ([5 x i8], [5 x i8]* @.str.7, i32 0, i32 0), i64 4 })
   ret void

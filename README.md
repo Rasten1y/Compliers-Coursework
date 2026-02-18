@@ -116,7 +116,7 @@ clang -c -o subset_example.o subset_example.ll
 ```
 Может всплыть предупреждение, не повлияет на работу
 ```
-clang -o subset_example.exe subset_example.o runtime\print.c runtime\map.c runtime\io.c
+clang -o subset_example.exe subset_example.o runtime\print.c runtime\map.c
 ```
 Аналогично с большим предупреждением
 ```
@@ -131,7 +131,7 @@ clang -o subset_example.exe subset_example.o runtime\print.c runtime\map.c runti
     0
     end
 
-Для map/len используется `runtime\map.c`, для файловых обёрток — `runtime\io.c`.
+Для map/len используется `runtime\map.c`
 
 ### Сборка бэкенда
 Команды для сборки бэкенда (компиляция `backend/llvm.go` вместе с `ir/ir.go`):
